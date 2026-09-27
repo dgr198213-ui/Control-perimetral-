@@ -1,0 +1,55 @@
+services:
+  frigate:
+    container_name: perimetral-frigate
+    image: ghcr.io/blakeblackshear/frigate:stable
+    restart: unless-stopped
+    privileged: false
+    shm_size: "256mb"
+    ports:
+      - "${DASHBOARD_BIND_ADDRESS:-127.0.0.1}:5000:5000"
+    volumes:
+      - ./frigate/config.yml:/config/config.yml:ro
+      - ./storage:/media/frigate
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      FRIGATE_MQTT_HOST: mosquitto
+      FRIGATE_MQTT_PORT: 1883
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5000/api/version >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    container_name: perimetral-mosquitto
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./storage/mosquitto:/mosquitto/data
+    expose:
+      - "1883"
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -t '$$SYS/broker/uptime' -C 1 -W 3 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  notifier:
+    container_name: perimetral-notifier
+    build: ./notifier
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      COMPLIANCE_DIR: /compliance
+    volumes:
+      - ./compliance:/compliance:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy

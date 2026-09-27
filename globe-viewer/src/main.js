@@ -1,0 +1,95 @@
+import * as Cesium from "cesium";
+import "cesium/Build/Cesium/Widgets/widgets.css";
+import { addCameraViewshed } from "./viewshed.js";
+import { startFrigateBridge } from "./frigateBridge.js";
+import { CAMERAS } from "./cameras.config.js";
+
+// ── Globo base ──────────────────────────────────────────────────────────
+// Imagería Esri satélite: sin clave, sin coste. Coherente con "presupuesto
+// mínimo/gratuito" — si más adelante quieres 3D fotorrealista, sigue las
+// instrucciones de God's Eye View para añadir un token de Cesium ion.
+const viewer = new Cesium.Viewer("cesiumContainer", {
+  baseLayerPicker: false,
+  geocoder: false,
+  homeButton: true,
+  sceneModePicker: false,
+  navigationHelpButton: false,
+  animation: false,
+  timeline: false,
+  fullscreenButton: false,
+  imageryProvider: new Cesium.UrlTemplateImageryProvider({
+    url:
+      "https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    credit: "Esri World Imagery",
+  }),
+});
+
+// ── Cámaras del perímetro: marcador + cono de cobertura (viewshed) ───────
+const cameraMarkers = {};
+
+CAMERAS.forEach((camera, i) => {
+  const position = Cesium.Cartesian3.fromDegrees(
+    camera.lon,
+    camera.lat,
+    camera.groundAltM + camera.mountHeightM,
+  );
+
+  cameraMarkers[camera.id] = viewer.entities.add({
+    position,
+    point: {
+      pixelSize: 10,
+      color: Cesium.Color.CYAN,
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+    },
+    label: {
+      text: camera.label,
+      font: "14px monospace",
+      fillColor: Cesium.Color.CYAN,
+      pixelOffset: new Cesium.Cartesian2(0, -20),
+    },
+  });
+
+  addCameraViewshed(viewer, camera, Cesium.Color.CYAN);
+});
+
+// Encuadra la vista sobre las cámaras configuradas al arrancar
+if (CAMERAS.some((c) => c.lat !== 0 || c.lon !== 0)) {
+  viewer.zoomTo(viewer.entities);
+} else {
+  console.warn(
+    "[perímetro] Rellena las coordenadas reales en src/cameras.config.js — " +
+      "el globo está centrado en 0,0 (placeholder).",
+  );
+}
+
+// ── Eventos de detección en tiempo real (Frigate) ─────────────────────────
+const eventFeedEl = document.getElementById("eventFeed");
+const eventLines = [];
+
+function pulseCamera(cameraId, label) {
+  const entity = cameraMarkers[cameraId];
+  if (!entity) return;
+
+  // Pulso visual: agranda y vuelve a encoger el punto de la cámara
+  const original = 10;
+  entity.point.pixelSize = 22;
+  entity.point.color = Cesium.Color.RED;
+  setTimeout(() => {
+    entity.point.pixelSize = original;
+    entity.point.color = Cesium.Color.CYAN;
+  }, 1500);
+}
+
+function logEvent({ camera, label, score, startTime }) {
+  const hora = new Date(startTime * 1000).toLocaleTimeString();
+  const pct = score ? ` (${Math.round(score * 100)}%)` : "";
+  eventLines.unshift(`[${hora}] ${camera}: ${label}${pct}`);
+  eventLines.splice(10); // conserva solo los últimos 10
+  eventFeedEl.textContent = eventLines.join("\n");
+}
+
+startFrigateBridge(({ camera, label, score, startTime }) => {
+  pulseCamera(camera, label);
+  logEvent({ camera, label, score, startTime });
+});

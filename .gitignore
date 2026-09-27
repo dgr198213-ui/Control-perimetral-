@@ -1,0 +1,11 @@
+.env
+compliance/carteleria-verificada
+compliance/encargo-tratamiento-firmado
+storage/*
+!storage/.gitkeep
+frigate/config.yml.before-activation.*.bak
+*.original
+*.previous
+
+__pycache__/
+*.py[cod]
