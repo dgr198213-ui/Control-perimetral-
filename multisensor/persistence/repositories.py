@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Protocol, TypeVar
 
-from multisensor.contracts import Evidence, Incident, Observation
+from multisensor.contracts import Evidence, Event, Incident, Observation
 
 
 T = TypeVar("T")
@@ -17,6 +17,12 @@ class ObservationRepository(Protocol):
     def save(self, observation: Observation) -> Observation: ...
     def get(self, observation_id: str) -> Observation | None: ...
     def all(self) -> tuple[Observation, ...]: ...
+
+
+class EventRepository(Protocol):
+    def save(self, event: Event) -> Event: ...
+    def get(self, event_id: str) -> Event | None: ...
+    def all(self) -> tuple[Event, ...]: ...
 
 
 class EvidenceRepository(Protocol):
@@ -62,6 +68,21 @@ class InMemoryObservationRepository(_MemoryRepository, ObservationRepository):
         return self._get(observation_id)
 
     def all(self) -> tuple[Observation, ...]:
+        return self._all()
+
+
+class InMemoryEventRepository(_MemoryRepository, EventRepository):
+    entity_name = "evento"
+
+    def save(self, event: Event) -> Event:
+        if not isinstance(event, Event):
+            raise RepositoryError("se requiere Event")
+        return self._save(event.id, event)
+
+    def get(self, event_id: str) -> Event | None:
+        return self._get(event_id)
+
+    def all(self) -> tuple[Event, ...]:
         return self._all()
 
 

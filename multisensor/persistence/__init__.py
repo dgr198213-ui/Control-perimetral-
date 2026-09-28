@@ -1,7 +1,9 @@
 """Persistencia intercambiable del MVP multisensor."""
 
 from .repositories import (
+    EventRepository,
     EvidenceRepository,
+    InMemoryEventRepository,
     InMemoryEvidenceRepository,
     InMemoryIncidentRepository,
     InMemoryObservationRepository,
@@ -11,8 +13,10 @@ from .repositories import (
 )
 
 __all__ = [
+    "EventRepository",
     "EvidenceRepository",
     "IncidentRepository",
+    "InMemoryEventRepository",
     "InMemoryEvidenceRepository",
     "InMemoryIncidentRepository",
     "InMemoryObservationRepository",

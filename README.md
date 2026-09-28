@@ -83,6 +83,31 @@ El procesamiento de vídeo se realiza dentro del mini-PC y el stack no publica e
 
 Las cámaras deben apuntar únicamente al perímetro autorizado. No uses el sistema para vigilar espacios públicos, viviendas colindantes o zonas ajenas a la finca. Revisa periódicamente los logs, el almacenamiento y las reglas de retención, y elimina los datos cuando venza el plazo definido por el responsable.
 
+## API HTTP multisensor
+
+El núcleo multisensor expone una API HTTP de solo lectura mediante `multisensor.api`. La auditoría del repositorio no encontró un framework HTTP existente; por eso esta primera versión usa Flask únicamente como adaptador de transporte, sin duplicar reglas de correlación, fusión o incidentes.
+
+Las rutas disponibles son:
+
+| Ruta | Contenido |
+|---|---|
+| `GET /api/multisensor/observations` | Colección de observaciones canónicas. |
+| `GET /api/multisensor/observations/{id}` | Observación concreta. |
+| `GET /api/multisensor/events` | Eventos correlacionados. |
+| `GET /api/multisensor/events/{id}` | Evento concreto con `observation_ids`. |
+| `GET /api/multisensor/incidents` | Incidentes producidos por `IncidentEngine`. |
+| `GET /api/multisensor/incidents/{id}` | Incidente con `evidence_ids`, score y explicación. |
+| `GET /api/multisensor/sensors` | Sensores derivados de las observaciones almacenadas. |
+
+Las respuestas mantienen timestamps UTC, IDs, scores, referencias y explicaciones de los contratos de dominio. Las colecciones aceptan `?limit=1..1000`. Los errores se serializan como `bad_request` (400), `not_found` (404) o `internal_error` (500). La aplicación recibe repositorios por inyección; por defecto usa los repositorios en memoria. Todavía no se añaden PostgreSQL/PostGIS, Cesium, Telegram ni webhooks.
+
+Para ejecutar localmente, instala `multisensor/api/requirements.txt` y arranca:
+
+```bash
+python3 -m pip install -r multisensor/api/requirements.txt
+python3 -m multisensor.api.app
+```
+
 ## Visor 3D opcional
 
 `globe-viewer/` es una utilidad separada para visualizar posiciones configuradas de cámaras. No participa en la detección, no sustituye al dashboard de Frigate y debe completarse con coordenadas autorizadas antes de usarse.
