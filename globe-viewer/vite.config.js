@@ -3,6 +3,14 @@ import cesium from "vite-plugin-cesium";
 
 export default defineConfig({
   plugins: [cesium()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        calibrate: "calibrate.html",
+      },
+    },
+  },
   server: {
     host: "127.0.0.1", // solo local, coherente con el resto del stack — no exponer a internet
     port: 5173,

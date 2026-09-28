@@ -35,11 +35,11 @@ Abre `http://127.0.0.1:5173/calibrate.html`.
 3. Click en el mapa hacia donde apunta — el heading se calcula solo, no hace falta brújula.
 4. Ajusta pitch/FOV/alcance/altura con los sliders mientras ves el cono de cobertura en tiempo real.
 5. Ponle el mismo `id` que tiene en `frigate/config.yml` y pulsa "Guardar cámara".
-6. Repite para cada cámara, luego "Exportar cameras.config.js" y pega el resultado en `src/cameras.config.js`.
+6. Repite para cada cámara, luego "Exportar cameras.config.js" y guarda el resultado localmente en `src/cameras.config.js` (este archivo está excluido de Git).
 
 ## Antes de que sea útil de verdad
 
-1. **Rellena `src/cameras.config.js`** con la posición GPS real, el rumbo
+1. **Crea localmente y rellena `src/cameras.config.js`** con la posición GPS real, el rumbo
    (heading) y el resto de la pose de cada cámara — o mejor, usa la
    herramienta de calibración (`calibrate.html`, ver más arriba) y evítate
    medirlo a mano. Sin esto, el globo se queda centrado en 0,0 y no
@@ -48,6 +48,10 @@ Abre `http://127.0.0.1:5173/calibrate.html`.
    exactamente con el nombre de la cámara en `../frigate/config.yml`
    (`camara_1`, `camara_2`...), porque así se cruzan los eventos con la
    pose correcta.
+
+## Build y despliegue estático
+
+Para Vercel, configura `globe-viewer` como **Root Directory** y usa el comando `npm run build`. La salida será `dist/`, con `index.html` y `calibrate.html`.
 
 ## Limitación importante
 

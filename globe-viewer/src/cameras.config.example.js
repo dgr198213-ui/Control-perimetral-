@@ -1,7 +1,8 @@
 /**
- * cameras.config.js
+ * cameras.config.example.js
  *
- * Define aquí la pose real de cada cámara del perímetro. Estos valores no se
+ * Plantilla ficticia para la pose de las cámaras. La configuración real vive
+ * en cameras.config.js, que permanece fuera de Git. Estos valores no se
  * pueden inventar — hay que medirlos/estimarlos en el sitio real:
  *
  *  - lat, lon: posición GPS de la cámara (Google Maps: mantener pulsado el

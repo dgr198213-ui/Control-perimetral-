@@ -11,11 +11,13 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   animation: false,
   timeline: false,
   fullscreenButton: false,
-  imageryProvider: new Cesium.UrlTemplateImageryProvider({
-    url:
-      "https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    credit: "Esri World Imagery",
-  }),
+  baseLayer: new Cesium.ImageryLayer(
+    new Cesium.UrlTemplateImageryProvider({
+      url:
+        "https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      credit: "Esri World Imagery",
+    }),
+  ),
 });
 
 // ── Estado ─────────────────────────────────────────────────────────────
