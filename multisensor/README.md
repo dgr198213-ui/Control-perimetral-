@@ -17,7 +17,7 @@ Todos los tiempos deben incluir zona horaria y se normalizan a UTC. La confianza
 
 ## Normalización
 
-`normalize_observation` convierte un objeto de entrada al contrato `Observation`. El adaptador puro de Frigate está disponible en `multisensor/adapters/frigate.py`; los adaptadores de PIR y Wi-Fi CSI se añadirán en fases posteriores. El adaptador de Frigate todavía no se conecta al suscriptor MQTT del notificador, para preservar el flujo operativo existente.
+`normalize_observation` convierte un objeto de entrada al contrato `Observation`. Los adaptadores puros están disponibles en `multisensor/adapters/`: Frigate transforma eventos `new` de `frigate/events` y PIR transforma lecturas `motion`/`active`/`state`. Ambos producen el mismo contrato canónico y pueden seleccionarse mediante `message_to_observation(sensor_type, message)`. El adaptador PIR todavía no abre un puerto ni se conecta a hardware o broker; queda listo para la siguiente integración de transporte.
 
 ```python
 from multisensor.normalization import normalize_observation
@@ -43,4 +43,4 @@ Desde la raíz del repositorio se ejecuta la suite de esta fase con:
 python3 -m unittest discover -s multisensor/tests -p 'test_*.py' -v
 ```
 
-El adaptador de Frigate no incorpora código externo: conserva el identificador, cámara, etiqueta, zonas, puntuación y datos relevantes del evento en la observación canónica, sin incluir credenciales. Cuando se incorporen adaptadores o algoritmos de terceros, se documentarán su procedencia, licencia y avisos aplicables antes de reutilizar código.
+Los adaptadores de Frigate y PIR no incorporan código externo. Frigate conserva identificador, cámara, etiqueta, zonas y puntuación; PIR conserva sensor, estado, confianza y metadatos seguros como GPIO, batería o señal, sin incluir credenciales. Cuando se incorporen adaptadores o algoritmos de terceros, se documentarán su procedencia, licencia y avisos aplicables antes de reutilizar código.
