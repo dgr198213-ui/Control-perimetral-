@@ -17,7 +17,7 @@ Todos los tiempos deben incluir zona horaria y se normalizan a UTC. La confianza
 
 ## Normalización
 
-`normalize_observation` convierte un objeto de entrada al contrato `Observation`. Aún no entiende formatos específicos de Frigate, PIR ni Wi-Fi CSI: esos mapeos se añadirán en adaptadores independientes para no acoplar el núcleo a una fuente concreta.
+`normalize_observation` convierte un objeto de entrada al contrato `Observation`. El adaptador puro de Frigate está disponible en `multisensor/adapters/frigate.py`; los adaptadores de PIR y Wi-Fi CSI se añadirán en fases posteriores. El adaptador de Frigate todavía no se conecta al suscriptor MQTT del notificador, para preservar el flujo operativo existente.
 
 ```python
 from multisensor.normalization import normalize_observation
@@ -43,4 +43,4 @@ Desde la raíz del repositorio se ejecuta la suite de esta fase con:
 python3 -m unittest discover -s multisensor/tests -p 'test_*.py' -v
 ```
 
-La Fase 0 no incorpora código de repositorios externos. Cuando se incorporen adaptadores o algoritmos de terceros, se documentarán su procedencia, licencia y avisos aplicables antes de reutilizar código.
+El adaptador de Frigate no incorpora código externo: conserva el identificador, cámara, etiqueta, zonas, puntuación y datos relevantes del evento en la observación canónica, sin incluir credenciales. Cuando se incorporen adaptadores o algoritmos de terceros, se documentarán su procedencia, licencia y avisos aplicables antes de reutilizar código.
