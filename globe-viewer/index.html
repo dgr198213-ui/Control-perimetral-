@@ -13,6 +13,19 @@
         overflow: hidden;
         background: #000;
       }
+      #multisensorStatus {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 10;
+        font-family: monospace;
+        font-size: 12px;
+        color: #b8d8ff;
+        background: rgba(0,0,0,0.65);
+        padding: 7px 10px;
+        border-radius: 6px;
+        max-width: 360px;
+      }
       #eventFeed {
         position: absolute;
         top: 10px;
@@ -24,12 +37,19 @@
         background: rgba(0,0,0,0.55);
         padding: 8px 12px;
         border-radius: 6px;
-        max-width: 320px;
+        max-width: 420px;
         max-height: 200px;
         overflow-y: auto;
         white-space: pre-line;
       }
       @media (max-width: 480px) {
+        #multisensorStatus {
+          top: 10px;
+          right: 10px;
+          left: 10px;
+          max-width: none;
+          font-size: 11px;
+        }
         #eventFeed {
           top: auto;
           right: 10px;
@@ -44,7 +64,8 @@
   </head>
   <body>
     <div id="cesiumContainer"></div>
-    <div id="eventFeed">Esperando eventos de Frigate…</div>
+    <div id="multisensorStatus">Multisensor: conectando…</div>
+    <div id="eventFeed">Esperando eventos de Frigate y del núcleo multisensor…</div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

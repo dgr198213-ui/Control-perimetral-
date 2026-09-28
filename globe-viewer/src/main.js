@@ -2,6 +2,8 @@ import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { addCameraViewshed } from "./viewshed.js";
 import { startFrigateBridge } from "./frigateBridge.js";
+import { startMultisensorBridge } from "./multisensorBridge.js";
+import { createMultisensorLayers } from "./multisensorLayers.js";
 import { CAMERAS as EXAMPLE_CAMERAS } from "./cameras.config.example.js";
 
 // Configuración real opcional, ignorada por Git. En Vercel o una instalación
@@ -73,7 +75,9 @@ if (CAMERAS.some((c) => c.lat !== 0 || c.lon !== 0)) {
 
 // ── Eventos de detección en tiempo real (Frigate) ─────────────────────────
 const eventFeedEl = document.getElementById("eventFeed");
+const multisensorStatusEl = document.getElementById("multisensorStatus");
 const eventLines = [];
+const multisensorLayers = createMultisensorLayers(viewer);
 
 function pulseCamera(cameraId, label) {
   const entity = cameraMarkers[cameraId];
@@ -102,4 +106,29 @@ function logEvent({ camera, label, score, startTime }) {
 startFrigateBridge(({ camera, label, score, startTime }) => {
   pulseCamera(camera, label);
   logEvent({ camera, label, score, startTime });
+});
+
+function logMultisensor(kind, item) {
+  const prefix = kind === "incident" ? "INCIDENTE" : item.sensor_type;
+  const id = item.id || "sin-id";
+  eventLines.unshift(`[${new Date().toLocaleTimeString()}] ${prefix}: ${id}`);
+  eventLines.splice(10);
+  eventFeedEl.textContent = eventLines.join("\n");
+}
+
+startMultisensorBridge({
+  onObservation: (observation) => {
+    multisensorLayers.upsertObservation(observation);
+    logMultisensor("observation", observation);
+    if (multisensorStatusEl) multisensorStatusEl.textContent = "Multisensor: conectado";
+  },
+  onIncident: (incident) => {
+    multisensorLayers.upsertIncident(incident);
+    logMultisensor("incident", incident);
+    if (multisensorStatusEl) multisensorStatusEl.textContent = "Multisensor: incidente recibido";
+  },
+  onError: (error) => {
+    if (multisensorStatusEl) multisensorStatusEl.textContent = `Multisensor: sin conexión (${error.message})`;
+    console.warn("[multisensorBridge] API no disponible:", error.message);
+  },
 });

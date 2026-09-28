@@ -22,6 +22,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/frigate-api/, ""),
       },
+      // API multisensor local de solo lectura; el navegador nunca contacta MQTT.
+      "/multisensor-api": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/multisensor-api/, ""),
+      },
     },
   },
 });

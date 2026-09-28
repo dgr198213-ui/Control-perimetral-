@@ -61,3 +61,31 @@ está el objeto en el mundo (para eso haría falta homografía cámara→terreno
 que no está incluida en este MVP). Es una alerta geolocalizada por cámara,
 no un tracking de posición real del objeto — suficiente para saber "algo
 pasó en la cámara X", no para saber "está a 12 metros al norte del poste".
+
+
+## Integración multisensor en tiempo real
+
+El visor consulta la API HTTP de solo lectura mediante el proxy local `/multisensor-api`, que apunta a `http://127.0.0.1:8000`. El navegador no se conecta directamente a MQTT y no decide si existe una intrusión: representa los contratos ya producidos por el núcleo.
+
+| Capa | Representación |
+|---|---|
+| `camera` | Punto naranja asociado a la ubicación del contrato `Observation`; Frigate mantiene además el pulso rojo de la cámara configurada. |
+| `pir` | Punto amarillo en la ubicación canónica del sensor. |
+| `wifi_csi` | Punto magenta en la ubicación canónica del sensor. |
+| `Incident` | Punto rojo de mayor tamaño con etiqueta, score, estado, `evidence_ids` y explicación. |
+
+`multisensorBridge.js` realiza polling cada tres segundos de `/api/multisensor/observations` e `/api/multisensor/incidents`, a través del proxy Vite, y deduplica por ID. `multisensorLayers.js` convierte las entidades con ubicación válida en objetos Cesium y conserva descripciones seleccionables. Los eventos sin ubicación no se dibujan en el mapa, pero no se convierten artificialmente en coordenadas.
+
+Para disponer de datos multisensor durante el desarrollo hay que iniciar por separado la API HTTP del núcleo y el visor:
+
+```bash
+# Terminal 1, desde la raíz
+python3 -m multisensor.api.app
+
+# Terminal 2
+cd globe-viewer
+npm install
+npm run dev
+```
+
+La integración visual no sustituye la configuración de `src/cameras.config.js`: para Frigate, el pulso sigue representando la posición de la cámara y no la posición exacta del objeto detectado. Del mismo modo, una observación o incidente solo aparece geolocalizado si el contrato del backend incluye `location` válida. Cesium no envía Telegram, no publica webhooks y no aplica el Policy Engine.
