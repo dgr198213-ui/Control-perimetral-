@@ -4,9 +4,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY requirements.txt ./
+COPY notifier/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
-COPY notifier.py ./
+COPY notifier/notifier.py ./notifier.py
+COPY multisensor ./multisensor
 RUN useradd --create-home --uid 10001 notifier
 USER notifier
 

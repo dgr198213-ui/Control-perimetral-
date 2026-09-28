@@ -15,6 +15,8 @@ from typing import Any
 import paho.mqtt.client as mqtt
 import requests
 
+from multisensor.adapters import FrigateAdapterError, frigate_event_to_observation
+
 LOG = logging.getLogger("perimetral-notifier")
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -61,14 +63,26 @@ def on_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> N
         LOG.warning("Evento MQTT no válido descartado")
         return
 
-    if payload.get("type") != "new":
+    try:
+        observation = frigate_event_to_observation(payload)
+    except FrigateAdapterError as exc:
+        # Los eventos de actualización y los mensajes incompletos no alteran
+        # el comportamiento operativo ni deben bloquear el suscriptor.
+        if isinstance(payload, dict) and payload.get("type") == "new":
+            LOG.warning("Observación Frigate no válida descartada: %s", exc)
         return
 
-    after = payload.get("after") or {}
-    event_id = str(after.get("id") or payload.get("id") or "")
-    label = after.get("label")
-    camera = after.get("camera") or "desconocida"
-    zones = set(after.get("current_zones") or after.get("zones") or [])
+    event_id = str(observation.payload["frigate_event_id"])
+    label = str(observation.payload["label"])
+    camera = str(observation.payload["camera"])
+    zones = set(observation.payload["zones"])
+    LOG.info(
+        "Observación canónica recibida: id=%s sensor=%s tipo=%s confianza=%.3f",
+        observation.id,
+        observation.sensor_id,
+        observation.event_type,
+        observation.confidence,
+    )
 
     if event_id and event_id in SEEN_EVENTS:
         return
