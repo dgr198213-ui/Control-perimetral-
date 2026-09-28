@@ -2,7 +2,12 @@ import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { addCameraViewshed } from "./viewshed.js";
 import { startFrigateBridge } from "./frigateBridge.js";
-import { CAMERAS } from "./cameras.config.js";
+import { CAMERAS as EXAMPLE_CAMERAS } from "./cameras.config.example.js";
+
+// Configuración real opcional, ignorada por Git. En Vercel o una instalación
+// limpia no existe y se conserva el fallback ficticio para que la build funcione.
+const localConfig = import.meta.glob("./cameras.config.js", { eager: true });
+const CAMERAS = Object.values(localConfig)[0]?.CAMERAS ?? EXAMPLE_CAMERAS;
 
 // ── Globo base ──────────────────────────────────────────────────────────
 // Imagería Esri satélite: sin clave, sin coste. Coherente con "presupuesto
@@ -17,15 +22,18 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   animation: false,
   timeline: false,
   fullscreenButton: false,
-  imageryProvider: new Cesium.UrlTemplateImageryProvider({
-    url:
-      "https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    credit: "Esri World Imagery",
-  }),
+  baseLayer: new Cesium.ImageryLayer(
+    new Cesium.UrlTemplateImageryProvider({
+      url:
+        "https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      credit: "Esri World Imagery",
+    }),
+  ),
 });
 
 // ── Cámaras del perímetro: marcador + cono de cobertura (viewshed) ───────
 const cameraMarkers = {};
+const pulseTimeouts = {};
 
 CAMERAS.forEach((camera, i) => {
   const position = Cesium.Cartesian3.fromDegrees(
@@ -73,11 +81,13 @@ function pulseCamera(cameraId, label) {
 
   // Pulso visual: agranda y vuelve a encoger el punto de la cámara
   const original = 10;
+  if (pulseTimeouts[cameraId]) clearTimeout(pulseTimeouts[cameraId]);
   entity.point.pixelSize = 22;
   entity.point.color = Cesium.Color.RED;
-  setTimeout(() => {
+  pulseTimeouts[cameraId] = setTimeout(() => {
     entity.point.pixelSize = original;
     entity.point.color = Cesium.Color.CYAN;
+    delete pulseTimeouts[cameraId];
   }, 1500);
 }
 

@@ -3,6 +3,9 @@ compliance/carteleria-verificada
 compliance/encargo-tratamiento-firmado
 storage/*
 !storage/.gitkeep
+data/
+secrets/
+globe-viewer/src/cameras.config.js
 frigate/config.yml.before-activation.*.bak
 *.original
 *.previous
