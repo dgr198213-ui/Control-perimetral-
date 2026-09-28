@@ -4,7 +4,7 @@ import { addCameraViewshed, bearingBetween } from "./viewshed.js";
 
 const viewer = new Cesium.Viewer("cesiumContainer", {
   baseLayerPicker: false,
-  geocoder: true, // aquí sí ayuda: busca tu dirección/finca por nombre
+  geocoder: false, // Sin búsquedas externas: la ubicación se ajusta directamente sobre el mapa.
   homeButton: true,
   sceneModePicker: false,
   navigationHelpButton: false,
