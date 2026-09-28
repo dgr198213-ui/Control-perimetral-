@@ -35,6 +35,25 @@ observation = normalize_observation({
 })
 ```
 
+## Correlación temporal y espacial
+
+`TemporalSpatialCorrelator` recibe `Observation` de Frigate, PIR y WiFi-CSI y devuelve un `Correlation` basado en `Event`. La correlación requiere por defecto al menos dos tipos de sensor distintos; una cámara sola no genera una correlación. La ventana temporal predeterminada es de 5 segundos y la distancia máxima predeterminada es de 75 metros.
+
+La puntuación es explícita y auditable:
+
+> `evidence_weight × temporal_factor × spatial_factor × reliability_factor`
+
+El resultado conserva en `Event.payload` los identificadores de observaciones, tipos de sensor, duración de la ventana, distancias, factores y la regla aplicada. Dos sensores temporalmente próximos elevan la evidencia; sensores incompatibles espacialmente se rechazan; una ubicación desconocida se penaliza, pero no se convierte artificialmente en incompatibilidad. El motor deduplica por conjunto de observaciones y produce un evento `multisensor_motion`, no un `Incident` ni una alerta.
+
+```python
+from multisensor.correlation import TemporalSpatialCorrelator
+
+engine = TemporalSpatialCorrelator()
+correlation = engine.ingest(observation)
+if correlation:
+    print(correlation.event.to_dict())
+```
+
 ## Validación
 
 Desde la raíz del repositorio se ejecuta la suite de esta fase con:
@@ -43,4 +62,4 @@ Desde la raíz del repositorio se ejecuta la suite de esta fase con:
 python3 -m unittest discover -s multisensor/tests -p 'test_*.py' -v
 ```
 
-Los adaptadores de Frigate y PIR no incorporan código externo. Frigate conserva identificador, cámara, etiqueta, zonas y puntuación; PIR conserva sensor, estado, confianza y metadatos seguros como GPIO, batería o señal, sin incluir credenciales. Cuando se incorporen adaptadores o algoritmos de terceros, se documentarán su procedencia, licencia y avisos aplicables antes de reutilizar código.
+Los adaptadores de Frigate y PIR y el motor de correlación no incorporan código externo. Frigate conserva identificador, cámara, etiqueta, zonas y puntuación; PIR conserva sensor, estado, confianza y metadatos seguros como GPIO, batería o señal, sin incluir credenciales. La correlación solo combina observaciones ya existentes y no modifica los flujos operativos ni emite alertas. Cuando se incorporen adaptadores o algoritmos de terceros, se documentarán su procedencia, licencia y avisos aplicables antes de reutilizar código.
