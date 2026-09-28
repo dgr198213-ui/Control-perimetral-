@@ -54,6 +54,36 @@ if correlation:
     print(correlation.event.to_dict())
 ```
 
+## WiFi-CSI
+
+`wifi_csi_message_to_observation` acepta eventos ya procesados, no muestras CSI brutas. Requiere `sensor_id`, `timestamp`, `confidence` y `features`, conserva esas características en el payload y alimenta el mismo `Observation` que Frigate y PIR.
+
+```python
+from multisensor.adapters import message_to_observation
+
+observation = message_to_observation("wifi_csi", {
+    "sensor_id": "wifi-node-01",
+    "timestamp": "2026-09-28T19:20:16Z",
+    "event_type": "human_motion",
+    "confidence": 0.84,
+    "features": {"variance": 0.72, "fft_energy": 0.61, "threshold": 0.48},
+})
+```
+
+## Fusión, evidencia e incidentes
+
+El flujo se mantiene separado y auditable:
+
+`Observation → Correlation → EvidenceBundle → Incident`
+
+`FusionEngine` crea una `Evidence` por sensor y aplica la regla `sensor_confidence × temporal_factor × spatial_factor × sensor_reliability`; no suma confianzas. Dos sensores generan evidencia de un evento correlacionado. Tres sensores independientes producen un candidato a incidente. `IncidentEngine` aplica una política configurable —por defecto, tres sensores y confianza mínima de `0.5`— y crea `possible_intrusion` solo cuando se cumple el umbral.
+
+El incidente incluye `evidence_ids`, sensores, ventana temporal, score y explicación. La creación del incidente **no envía Telegram, no modifica Cesium y no constituye por sí sola una notificación**; la política y el transporte quedan desacoplados para una fase posterior.
+
+## Persistencia en memoria
+
+`multisensor.persistence` ofrece interfaces `ObservationRepository`, `EvidenceRepository` e `IncidentRepository`, con implementaciones `InMemory*Repository`. Guardan entidades tipadas, permiten recuperación por ID y rechazan duplicados. El objetivo es probar el flujo completo sin PostgreSQL/PostGIS; la persistencia externa puede añadirse cuando los contratos estén estabilizados.
+
 ## Validación
 
 Desde la raíz del repositorio se ejecuta la suite de esta fase con:
@@ -62,4 +92,4 @@ Desde la raíz del repositorio se ejecuta la suite de esta fase con:
 python3 -m unittest discover -s multisensor/tests -p 'test_*.py' -v
 ```
 
-Los adaptadores de Frigate y PIR y el motor de correlación no incorporan código externo. Frigate conserva identificador, cámara, etiqueta, zonas y puntuación; PIR conserva sensor, estado, confianza y metadatos seguros como GPIO, batería o señal, sin incluir credenciales. La correlación solo combina observaciones ya existentes y no modifica los flujos operativos ni emite alertas. Cuando se incorporen adaptadores o algoritmos de terceros, se documentarán su procedencia, licencia y avisos aplicables antes de reutilizar código.
+Los adaptadores de Frigate, PIR y WiFi-CSI, el correlador, la fusión, el motor de incidentes y los repositorios no incorporan código externo. WiFi-CSI conserva features ya procesadas, sin capturar CSI bruto. La fusión e incidentes no modifican los flujos operativos ni emiten alertas. Cuando se incorporen adaptadores o algoritmos de terceros, se documentarán su procedencia, licencia y avisos aplicables antes de reutilizar código.

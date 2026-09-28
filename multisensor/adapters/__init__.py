@@ -4,6 +4,7 @@ from typing import Any, Mapping
 
 from .frigate import FrigateAdapterError, frigate_event_to_observation
 from .pir import PirAdapterError, pir_message_to_observation
+from .wifi_csi import WifiCsiAdapterError, wifi_csi_message_to_observation
 
 
 def message_to_observation(sensor_type: str, message: Mapping[str, Any]):
@@ -15,13 +16,17 @@ def message_to_observation(sensor_type: str, message: Mapping[str, Any]):
         return frigate_event_to_observation(message)
     if normalized_type == "pir":
         return pir_message_to_observation(message)
+    if normalized_type in {"wifi", "wifi_csi", "wifi-csi"}:
+        return wifi_csi_message_to_observation(message)
     raise ValueError(f"Tipo de sensor no soportado: {sensor_type}")
 
 
 __all__ = [
     "FrigateAdapterError",
     "PirAdapterError",
+    "WifiCsiAdapterError",
     "frigate_event_to_observation",
     "message_to_observation",
     "pir_message_to_observation",
+    "wifi_csi_message_to_observation",
 ]
