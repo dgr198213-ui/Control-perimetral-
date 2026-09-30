@@ -17,11 +17,17 @@ jobs:
       - name: Validate Docker Compose
         run: docker compose config
 
+      - name: Install Python dependencies
+        run: python -m pip install -r control-api/requirements.txt -r multisensor/api/requirements.txt -r notifier/requirements.txt pytest
+
       - name: Run Python tests
-        run: python -m pytest multisensor/tests notifier/tests
+        run: PYTHONPATH=control-api python -m pytest control-api/tests multisensor/tests notifier/tests
 
       - name: Build notifier image
         run: docker build --file notifier/Dockerfile --tag perimetral-notifier:ci .
+
+      - name: Build control-api image
+        run: docker build --file control-api/Dockerfile --tag perimetral-control-api:ci .
 
       - name: Scan repository for secrets
         uses: gitleaks/gitleaks-action@v2

@@ -51,6 +51,12 @@ services:
     cap_drop:
       - ALL
     read_only: true
+    env_file:
+      - .env
+    environment:
+      CONTROL_API_DB: /data/control-api.sqlite3
+    volumes:
+      - ./data/control-api:/data
     expose:
       - "8000"
     tmpfs:
