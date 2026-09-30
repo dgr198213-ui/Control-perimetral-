@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import unittest
 
-from multisensor.adapters import FrigateAdapterError, frigate_event_to_observation
+from multisensor.adapters import FrigateAdapterError, FrigateEventProcessor, frigate_event_to_observation
 
 
 class FrigateAdapterTests(unittest.TestCase):
@@ -119,6 +119,36 @@ class FrigateAdapterTests(unittest.TestCase):
             frigate_event_to_observation(
                 {"type": "new", "after": {**base["after"], "zones": "zona_perimetro"}}
             )
+
+
+    def test_update_with_new_zone_is_emitted_once_after_new_without_zone(self) -> None:
+        processor = FrigateEventProcessor()
+        base = {
+            "id": "evt-update-1",
+            "camera": "camara_1",
+            "label": "person",
+            "start_time": 1790623214.0,
+            "top_score": 0.8,
+        }
+        first = processor.process({"type": "new", "after": base})
+        self.assertEqual(first.payload["zones"], [])
+        update = processor.process(
+            {"type": "update", "after": {**base, "current_zones": ["zona_perimetro"]}}
+        )
+        self.assertIsNotNone(update)
+        self.assertEqual(update.payload["zones"], ["zona_perimetro"])
+        self.assertEqual(update.payload["source_message_type"], "update")
+        duplicate = processor.process(
+            {"type": "update", "after": {**base, "current_zones": ["zona_perimetro"]}}
+        )
+        self.assertIsNone(duplicate)
+
+    def test_update_for_unknown_event_is_ignored(self) -> None:
+        processor = FrigateEventProcessor()
+        result = processor.process(
+            {"type": "update", "after": {"id": "unknown", "current_zones": ["zona_perimetro"]}}
+        )
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ from typing import Any
 import paho.mqtt.client as mqtt
 import requests
 
-from multisensor.adapters import FrigateAdapterError, frigate_event_to_observation
+from multisensor.adapters import FrigateAdapterError, FrigateEventProcessor
 
 LOG = logging.getLogger("perimetral-notifier")
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
@@ -32,6 +32,7 @@ NOTIFY_ZONES = {
 }
 NOTIFIABLE_CLASSES = {"person", "car", "motorcycle", "bicycle"}
 SEEN_EVENTS: set[str] = set()
+FRIGATE_EVENTS = FrigateEventProcessor()
 
 
 def compliance_ready() -> bool:
@@ -64,12 +65,14 @@ def on_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> N
         return
 
     try:
-        observation = frigate_event_to_observation(payload)
+        observation = FRIGATE_EVENTS.process(payload)
     except FrigateAdapterError as exc:
         # Los eventos de actualización y los mensajes incompletos no alteran
         # el comportamiento operativo ni deben bloquear el suscriptor.
         if isinstance(payload, dict) and payload.get("type") == "new":
             LOG.warning("Observación Frigate no válida descartada: %s", exc)
+        return
+    if observation is None:
         return
 
     event_id = str(observation.payload["frigate_event_id"])

@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
+import shutil
+import tempfile
 import unittest
 
 from multisensor.api import create_app
@@ -18,6 +21,10 @@ UTC = timezone.utc
 
 class ApiIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.compliance_dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.compliance_dir)
+        for marker in ("carteleria-verificada", "encargo-tratamiento-firmado"):
+            (self.compliance_dir / marker).touch()
         self.observations = InMemoryObservationRepository()
         self.events = InMemoryEventRepository()
         self.incidents = InMemoryIncidentRepository()
@@ -57,7 +64,25 @@ class ApiIntegrationTests(unittest.TestCase):
             observations=self.observations,
             events=self.events,
             incidents=self.incidents,
+            compliance_dir=self.compliance_dir,
         ).test_client()
+
+    def test_missing_compliance_blocks_every_read_endpoint(self) -> None:
+        blocked_dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, blocked_dir)
+        client = create_app(compliance_dir=blocked_dir).test_client()
+        for path in (
+            "/api/multisensor/observations",
+            "/api/multisensor/observations/obs:1",
+            "/api/multisensor/events",
+            "/api/multisensor/events/event:1",
+            "/api/multisensor/incidents",
+            "/api/multisensor/incidents/incident:1",
+            "/api/multisensor/sensors",
+        ):
+            response = client.get(path)
+            self.assertEqual(response.status_code, 403, path)
+            self.assertEqual(response.json["error"]["code"], "compliance_blocked")
 
     def test_collections_and_resource_endpoints_return_contracts(self) -> None:
         for path, key in (
@@ -98,7 +123,9 @@ class ApiIntegrationTests(unittest.TestCase):
             def all(self):
                 raise RuntimeError("backend failure")
 
-        client = create_app(observations=BrokenRepository()).test_client()
+        client = create_app(
+            observations=BrokenRepository(), compliance_dir=self.compliance_dir
+        ).test_client()
         response = client.get("/api/multisensor/observations")
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.json["error"]["code"], "internal_error")

@@ -128,3 +128,76 @@ def frigate_event_to_observation(message: Mapping[str, Any]) -> Observation:
         )
     except ContractValidationError as exc:
         raise FrigateAdapterError(str(exc)) from exc
+
+
+class FrigateEventProcessor:
+    """Procesa la secuencia new/update de un mismo evento Frigate.
+
+    El adaptador de conversión sigue siendo puro y compatible con mensajes ``new``.
+    Esta capa conserva únicamente el estado efímero necesario para reconocer cuando
+    un ``update`` aporta pertenencia a una zona que no estaba presente en ``new``.
+    """
+
+    def __init__(self) -> None:
+        self._events: dict[str, dict[str, Any]] = {}
+        self._zone_snapshots: dict[str, tuple[str, ...]] = {}
+
+    @staticmethod
+    def _zones(after: Mapping[str, Any]) -> tuple[str, ...]:
+        raw_zones = after.get("current_zones", after.get("zones", [])) or []
+        if not isinstance(raw_zones, (list, tuple, set)):
+            raise FrigateAdapterError("zones de Frigate debe ser una lista")
+        return tuple(sorted({str(zone).strip() for zone in raw_zones if str(zone).strip()}))
+
+    def process(self, message: Mapping[str, Any]) -> Observation | None:
+        if not isinstance(message, Mapping):
+            raise FrigateAdapterError("El mensaje Frigate debe ser un objeto")
+        message_type = message.get("type")
+        after = _event_body(message)
+        event_id = _required_text(after.get("id", message.get("id")), "id")
+
+        if message_type == "new":
+            if event_id in self._events:
+                return None
+            stored = dict(after)
+            self._events[event_id] = stored
+            self._zone_snapshots[event_id] = self._zones(stored)
+            return frigate_event_to_observation(message)
+
+        if message_type != "update":
+            raise FrigateAdapterError("Solo se admiten eventos Frigate de tipo new o update")
+        if event_id not in self._events:
+            return None
+
+        update_zones = after.get("current_zones", after.get("entered_zones"))
+        if update_zones is None:
+            return None
+        if not isinstance(update_zones, (list, tuple, set)):
+            raise FrigateAdapterError("zones de Frigate debe ser una lista")
+        normalized_update = tuple(sorted({str(zone).strip() for zone in update_zones if str(zone).strip()}))
+        previous_zones = self._zone_snapshots[event_id]
+        new_zones = tuple(zone for zone in normalized_update if zone not in previous_zones)
+        if not new_zones:
+            return None
+
+        merged = dict(self._events[event_id])
+        merged.update(after)
+        merged["current_zones"] = list(sorted(set(previous_zones) | set(normalized_update)))
+        self._events[event_id] = merged
+        self._zone_snapshots[event_id] = tuple(merged["current_zones"])
+        observation = frigate_event_to_observation({"type": "new", "after": merged})
+        return Observation(
+            id=observation.id,
+            sensor_id=observation.sensor_id,
+            sensor_type=observation.sensor_type,
+            timestamp=observation.timestamp,
+            event_type=observation.event_type,
+            confidence=observation.confidence,
+            location=observation.location,
+            payload={
+                **observation.payload,
+                "source_message_type": "update",
+                "new_zones": list(new_zones),
+            },
+            source=observation.source,
+        )
