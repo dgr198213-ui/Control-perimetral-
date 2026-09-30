@@ -3,9 +3,14 @@ compliance/carteleria-verificada
 compliance/encargo-tratamiento-firmado
 storage/*
 !storage/.gitkeep
+!storage/mosquitto/.gitkeep
+!storage/caddy-data/.gitkeep
+!storage/caddy-config/.gitkeep
 data/
 secrets/
+frigate/config.yml
 globe-viewer/src/cameras.config.js
+dashboard/dist/
 frigate/config.yml.before-activation.*.bak
 *.original
 *.previous
