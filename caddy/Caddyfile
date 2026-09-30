@@ -1,0 +1,14 @@
+:8080 {
+    bind 0.0.0.0
+    root * /srv/dashboard
+    encode gzip
+
+    handle /api/health {
+        reverse_proxy control-api:8000
+    }
+
+    handle {
+        try_files {path} /index.html
+        file_server
+    }
+}

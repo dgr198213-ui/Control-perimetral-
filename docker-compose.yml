@@ -1,14 +1,15 @@
 services:
   frigate:
     container_name: perimetral-frigate
-    image: ghcr.io/blakeblackshear/frigate:stable
+    image: ghcr.io/blakeblackshear/frigate:0.16.2
     restart: unless-stopped
-    privileged: false
+    cap_drop:
+      - ALL
     shm_size: "256mb"
-    ports:
-      - "${DASHBOARD_BIND_ADDRESS:-127.0.0.1}:5000:5000"
+    expose:
+      - "5000"
     volumes:
-      - ./frigate/config.yml:/config/config.yml:ro
+      - ./frigate/config.template.yml:/config/config.yml:ro
       - ./storage:/media/frigate
       - /etc/localtime:/etc/localtime:ro
     environment:
@@ -25,8 +26,11 @@ services:
 
   mosquitto:
     container_name: perimetral-mosquitto
-    image: eclipse-mosquitto:2
+    image: eclipse-mosquitto:2.0.22
     restart: unless-stopped
+    cap_drop:
+      - ALL
+    read_only: true
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./storage/mosquitto:/mosquitto/data
@@ -38,12 +42,57 @@ services:
       timeout: 5s
       retries: 10
 
+  control-api:
+    container_name: perimetral-control-api
+    build:
+      context: .
+      dockerfile: control-api/Dockerfile
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    read_only: true
+    expose:
+      - "8000"
+    tmpfs:
+      - /tmp:noexec,nosuid,size=16m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  caddy:
+    container_name: perimetral-caddy
+    image: caddy:2.9.1-alpine
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    ports:
+      - "${CADDY_BIND_ADDRESS:-127.0.0.1}:8080:8080"
+      - "${CADDY_BIND_ADDRESS:-127.0.0.1}:8443:8443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./dashboard:/srv/dashboard:ro
+      - ./storage/caddy-data:/data
+      - ./storage/caddy-config:/config
+    depends_on:
+      control-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
   notifier:
     container_name: perimetral-notifier
     build:
       context: .
       dockerfile: notifier/Dockerfile
     restart: unless-stopped
+    cap_drop:
+      - ALL
+    read_only: true
     env_file:
       - .env
     environment:
@@ -55,3 +104,7 @@ services:
     depends_on:
       mosquitto:
         condition: service_healthy
+
+networks:
+  default:
+    name: perimetral-internal
