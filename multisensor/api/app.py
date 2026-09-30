@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, request
@@ -18,6 +20,7 @@ from multisensor.persistence import (
 LOG = logging.getLogger("multisensor-api")
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 1000
+REQUIRED_EVIDENCE = ("carteleria-verificada", "encargo-tratamiento-firmado")
 
 
 def _error_payload(code: str, message: str) -> tuple[dict[str, Any], int]:
@@ -29,12 +32,27 @@ def create_app(
     observations: ObservationRepository | None = None,
     events: EventRepository | None = None,
     incidents: IncidentRepository | None = None,
+    compliance_dir: str | Path | None = None,
 ) -> Flask:
     """Crea una API desacoplada del almacenamiento concreto."""
     observation_repository = observations or InMemoryObservationRepository()
     event_repository = events or InMemoryEventRepository()
     incident_repository = incidents or InMemoryIncidentRepository()
+    evidence_dir = Path(compliance_dir or os.getenv("COMPLIANCE_DIR", "/compliance"))
     app = Flask(__name__)
+
+    def compliance_ready() -> bool:
+        return all((evidence_dir / name).is_file() for name in REQUIRED_EVIDENCE)
+
+    @app.before_request
+    def enforce_compliance_gate():
+        if request.path.startswith("/api/multisensor/") and not compliance_ready():
+            payload, _ = _error_payload(
+                "compliance_blocked",
+                "La API multisensor permanece bloqueada hasta confirmar las evidencias de cumplimiento",
+            )
+            return jsonify(payload), 403
+        return None
 
     def limit_value() -> int:
         raw_limit = request.args.get("limit")

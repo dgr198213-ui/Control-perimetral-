@@ -2,7 +2,7 @@
 
 from typing import Any, Mapping
 
-from .frigate import FrigateAdapterError, frigate_event_to_observation
+from .frigate import FrigateAdapterError, FrigateEventProcessor, frigate_event_to_observation
 from .pir import PirAdapterError, pir_message_to_observation
 from .wifi_csi import WifiCsiAdapterError, wifi_csi_message_to_observation
 
@@ -23,6 +23,7 @@ def message_to_observation(sensor_type: str, message: Mapping[str, Any]):
 
 __all__ = [
     "FrigateAdapterError",
+    "FrigateEventProcessor",
     "PirAdapterError",
     "WifiCsiAdapterError",
     "frigate_event_to_observation",

@@ -60,6 +60,7 @@ notifier = _load_notifier()
 class NotifierIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         notifier.SEEN_EVENTS.clear()
+        notifier.FRIGATE_EVENTS = notifier.FrigateEventProcessor()
         notifier.LOG = Mock()
         notifier.NOTIFY_ZONES = {"zona_perimetro"}
         notifier.NOTIFIABLE_CLASSES = {"person"}
@@ -90,6 +91,42 @@ class NotifierIntegrationTests(unittest.TestCase):
         log_text = " ".join(str(call) for call in notifier.LOG.info.call_args_list)
         self.assertIn("frigate:evt-live-1", log_text)
         self.assertIn("person_detected", log_text)
+
+    def test_update_with_zone_is_processed_once_after_new_without_zone(self) -> None:
+        new_msg = _FakeMessage()
+        new_msg.payload = json.dumps(
+            {
+                "type": "new",
+                "after": {
+                    "id": "evt-zone-late",
+                    "camera": "camara_1",
+                    "label": "person",
+                    "start_time": 1790623214.0,
+                    "top_score": 0.91,
+                },
+            }
+        ).encode("utf-8")
+        notifier.on_message(None, None, new_msg)
+
+        update_msg = _FakeMessage()
+        update_msg.payload = json.dumps(
+            {
+                "type": "update",
+                "after": {
+                    "id": "evt-zone-late",
+                    "camera": "camara_1",
+                    "label": "person",
+                    "start_time": 1790623214.0,
+                    "top_score": 0.91,
+                    "current_zones": ["zona_perimetro"],
+                },
+            }
+        ).encode("utf-8")
+        notifier.on_message(None, None, update_msg)
+        notifier.on_message(None, None, update_msg)
+
+        self.assertEqual(notifier.compliance_ready.call_count, 1)
+        notifier.send_telegram.assert_not_called()
 
     def test_update_event_is_ignored_without_warning_or_alert(self) -> None:
         msg = _FakeMessage()
