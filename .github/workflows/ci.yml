@@ -23,6 +23,10 @@ jobs:
       - name: Run Python tests
         run: PYTHONPATH=control-api python -m pytest control-api/tests multisensor/tests notifier/tests
 
+      - name: Build dashboard
+        working-directory: dashboard
+        run: corepack pnpm install --frozen-lockfile && corepack pnpm run build
+
       - name: Build notifier image
         run: docker build --file notifier/Dockerfile --tag perimetral-notifier:ci .
 

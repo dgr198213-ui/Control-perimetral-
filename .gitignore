@@ -11,6 +11,7 @@ secrets/
 frigate/config.yml
 globe-viewer/src/cameras.config.js
 dashboard/dist/
+dashboard/node_modules/
 frigate/config.yml.before-activation.*.bak
 *.original
 *.previous
