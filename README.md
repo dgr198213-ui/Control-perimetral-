@@ -26,6 +26,32 @@ Los archivos son marcadores, no copias de documentos. El contenido de las eviden
 
 Frigate utiliza clases genéricas (`person`, `car`, `motorcycle` y `bicycle`). La detección de drones **no está garantizada** y no se presenta como una capacidad disponible del modelo base.
 
+## Primer arranque reproducible
+
+El arranque completo se realiza desde la raíz del repositorio. Primero copia `.env.example` a `.env`, genera una clave Fernet y completa únicamente los secretos que vayas a utilizar:
+
+```bash
+cp .env.example .env
+python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+# pega la salida en CONTROL_API_ENCRYPTION_KEY dentro de .env
+docker compose config
+docker compose up -d --build
+```
+
+Cuando Caddy esté saludable, abre `https://localhost:8443`. En el primer acceso crea el único usuario local desde la pantalla de configuración/login. Después confirma las evidencias de cumplimiento desde la API o la interfaz antes de esperar grabación y avisos. Sin `carteleria-verificada` y `encargo-tratamiento-firmado` en `compliance/`, el sistema permanece bloqueado deliberadamente.
+
+El notificador persiste observaciones en `data/multisensor` y acciones en la misma carpeta. La cola deduplica acciones, reintenta entregas fallidas y conserva el estado después de un reinicio. Telegram solo se usa si `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID` están configurados; la ausencia de esos valores no rompe el arranque, pero deja las alertas pendientes/no entregadas.
+
+Para verificar el estado inicial:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 control-api notifier caddy
+curl -k https://localhost:8443/api/health
+```
+
+Para apagar y volver a arrancar conservando los datos, utiliza `docker compose down` y posteriormente `docker compose up -d`; no elimines `data/` ni `storage/`. Para una copia verificable usa `scripts/backup.sh`, y para restaurar exige `RESTORE_CONFIRM=YES` como medida contra sobreescrituras accidentales.
+
 ## Preparación
 
 Instala Docker Engine con Compose en el mini-PC local y coloca las cámaras en una red controlada. Copia la plantilla de variables:

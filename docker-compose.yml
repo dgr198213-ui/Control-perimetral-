@@ -137,8 +137,16 @@ services:
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883
       COMPLIANCE_DIR: /compliance
+      MULTISENSOR_DB: /data/multisensor.sqlite3
+      ACTIONS_DB: /data/actions.sqlite3
     volumes:
       - ./compliance:/compliance:ro
+      - ./data/multisensor:/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import os; assert os.path.isdir(\"/data\")'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
       mosquitto:
         condition: service_healthy

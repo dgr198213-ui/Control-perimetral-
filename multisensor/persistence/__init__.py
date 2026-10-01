@@ -1,6 +1,6 @@
 """Persistencia intercambiable del MVP multisensor."""
 
-from .sqlite import SQLiteDomainRepository
+from .sqlite import SQLiteDomainRepository, SQLiteObservationRepository
 from .repositories import (
     EventRepository,
     EvidenceRepository,
@@ -24,4 +24,5 @@ __all__ = [
     "ObservationRepository",
     "RepositoryError",
     "SQLiteDomainRepository",
+    "SQLiteObservationRepository",
 ]

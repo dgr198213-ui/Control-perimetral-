@@ -7,11 +7,64 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
-from multisensor.contracts import Incident, Location, Situation
+from multisensor.contracts import Incident, Location, Observation, Situation
 
 from .repositories import RepositoryError
 
 T = TypeVar("T", Situation, Incident)
+
+
+class SQLiteObservationRepository:
+    """Repositorio durable de observaciones canónicas."""
+
+    def __init__(self, path: str | Path = "data/multisensor.sqlite3") -> None:
+        self.path = Path(path)
+        if str(self.path) != ":memory:":
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.connection = sqlite3.connect(str(self.path), check_same_thread=False)
+        self.connection.row_factory = sqlite3.Row
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS observations (
+                id TEXT PRIMARY KEY, sensor_id TEXT NOT NULL, sensor_type TEXT NOT NULL,
+                timestamp TEXT NOT NULL, event_type TEXT NOT NULL, confidence REAL NOT NULL,
+                location TEXT, payload TEXT NOT NULL, source TEXT NOT NULL
+            )"""
+        )
+        self.connection.commit()
+
+    def save(self, observation: Observation) -> Observation:
+        if self.get(observation.id) is not None:
+            raise RepositoryError(f"observación duplicada: {observation.id}")
+        self.connection.execute(
+            "INSERT INTO observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (observation.id, observation.sensor_id, observation.sensor_type, observation.timestamp.isoformat(),
+             observation.event_type, observation.confidence,
+             json.dumps(observation.location.to_dict()) if observation.location else None,
+             json.dumps(dict(observation.payload), sort_keys=True), observation.source),
+        )
+        self.connection.commit()
+        return observation
+
+    def get(self, observation_id: str) -> Observation | None:
+        row = self.connection.execute("SELECT * FROM observations WHERE id = ?", (observation_id,)).fetchone()
+        if row is None:
+            return None
+        return self._from_row(row)
+
+    def all(self) -> tuple[Observation, ...]:
+        rows = self.connection.execute("SELECT * FROM observations ORDER BY timestamp, id").fetchall()
+        return tuple(self._from_row(row) for row in rows)
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> Observation:
+        location = json.loads(row["location"]) if row["location"] else None
+        return Observation(id=row["id"], sensor_id=row["sensor_id"], sensor_type=row["sensor_type"],
+                           timestamp=datetime.fromisoformat(row["timestamp"]), event_type=row["event_type"],
+                           confidence=row["confidence"], location=Location(**location) if location else None,
+                           payload=json.loads(row["payload"]), source=row["source"])
+
+    def close(self) -> None:
+        self.connection.close()
 
 
 class SQLiteDomainRepository:

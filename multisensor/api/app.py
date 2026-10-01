@@ -16,6 +16,7 @@ from multisensor.persistence import (
     InMemoryIncidentRepository,
     InMemoryObservationRepository,
     ObservationRepository,
+    SQLiteObservationRepository,
 )
 
 LOG = logging.getLogger("multisensor-api")
@@ -34,9 +35,11 @@ def create_app(
     events: EventRepository | None = None,
     incidents: IncidentRepository | None = None,
     compliance_dir: str | Path | None = None,
+    observation_db_path: str | Path | None = None,
+    testing: bool = False,
 ) -> Flask:
     """Crea una API desacoplada del almacenamiento concreto."""
-    observation_repository = observations or InMemoryObservationRepository()
+    observation_repository = observations or (InMemoryObservationRepository() if testing else SQLiteObservationRepository(observation_db_path or os.getenv("MULTISENSOR_DB", "data/multisensor.sqlite3")))
     event_repository = events or InMemoryEventRepository()
     incident_repository = incidents or InMemoryIncidentRepository()
     evidence_dir = Path(compliance_dir or os.getenv("COMPLIANCE_DIR", "/compliance"))
