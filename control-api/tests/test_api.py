@@ -212,3 +212,105 @@ def test_compliance_confirmation_revocation_and_kill_switch_lifecycle(tmp_path: 
 
     audit = client.get("/api/audit").json()["items"]
     assert [entry["action"] for entry in audit[-3:]] == ["confirm", "revoke", "clear_kill_switch"]
+
+
+def test_protection_profile_defaults_require_auth_and_are_persistent(tmp_path: Path) -> None:
+    anonymous = make_client(tmp_path)
+    assert anonymous.get("/api/protection-profile").status_code == 401
+
+    client = authenticated_client(tmp_path)
+    profile = client.get("/api/protection-profile")
+
+    assert profile.status_code == 200
+    assert profile.json() == {
+        "site_type": "property",
+        "protection_mode": "balanced",
+        "detect_people": True,
+        "detect_vehicles": True,
+        "detect_animals": False,
+        "night_protection": True,
+        "notify_on_suspicious": True,
+        "notify_on_incident": True,
+        "quiet_hours_start": None,
+        "quiet_hours_end": None,
+    }
+
+
+def test_protection_profile_updates_and_audits_changes(tmp_path: Path) -> None:
+    client = authenticated_client(tmp_path)
+    response = client.put(
+        "/api/protection-profile",
+        json={
+            "site_type": "farm",
+            "protection_mode": "strict",
+            "detect_people": True,
+            "detect_vehicles": False,
+            "detect_animals": True,
+            "night_protection": False,
+            "notify_on_suspicious": False,
+            "notify_on_incident": True,
+            "quiet_hours_start": "22:00",
+            "quiet_hours_end": "06:00",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["site_type"] == "farm"
+    assert response.json()["quiet_hours_end"] == "06:00"
+    assert client.get("/api/protection-profile").json() == response.json()
+    audit = client.get("/api/audit").json()["items"]
+    assert audit[-1]["action"] == "update"
+    assert audit[-1]["entity"] == "protection_profile"
+
+
+def test_protection_profile_rejects_invalid_values_and_inconsistent_hours(tmp_path: Path) -> None:
+    client = authenticated_client(tmp_path)
+    invalid_site = client.put("/api/protection-profile", json={"site_type": "castle"})
+    assert invalid_site.status_code == 422
+
+    invalid_boolean = client.put("/api/protection-profile", json={"detect_people": "true"})
+    assert invalid_boolean.status_code == 422
+
+    inconsistent_hours = client.put(
+        "/api/protection-profile",
+        json={"quiet_hours_start": "22:00", "quiet_hours_end": "22:00"},
+    )
+    assert inconsistent_hours.status_code == 422
+
+
+def test_protection_status_and_recommendations_use_existing_system_state(tmp_path: Path) -> None:
+    client = authenticated_client(tmp_path)
+    assert client.get("/api/protection/status").status_code == 200
+    assert client.get("/api/protection/recommendations").status_code == 200
+
+    status_response = client.get("/api/protection/status").json()
+    recommendations = client.get("/api/protection/recommendations").json()
+    assert status_response["status"] == "setup_required"
+    assert status_response["capabilities"]["cameras"] is False
+    assert status_response["capabilities"]["multisensor_correlation"] is False
+    assert "Añade y activa al menos una cámara" in status_response["setup_required"]
+    assert {item["code"] for item in recommendations["items"]} == {
+        "add_camera",
+        "confirm_compliance",
+    }
+
+
+def test_protection_status_reports_attention_for_unzoned_camera(tmp_path: Path) -> None:
+    client = authenticated_client(tmp_path)
+    assert client.post("/api/compliance/confirm", json={"reason": "Revisión documental completada"}).status_code == 200
+    created = client.post(
+        "/api/cameras",
+        json={
+            "name": "entrada",
+            "host": "192.0.2.20",
+            "path": "stream",
+            "username": "demo",
+            "password": "secreto-de-prueba",
+        },
+    )
+    assert created.status_code == 201
+
+    status_response = client.get("/api/protection/status").json()
+    assert status_response["status"] == "attention"
+    assert status_response["capabilities"]["cameras"] is True
+    assert status_response["recording_allowed"] is True

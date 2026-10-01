@@ -11,6 +11,7 @@ from multisensor.contracts import (
     Incident,
     Location,
     Observation,
+    Situation,
 )
 
 
@@ -96,6 +97,47 @@ class ContractTests(unittest.TestCase):
 
         self.assertEqual(evidence.to_dict()["event_id"], "evt-1")
         self.assertEqual(incident.to_dict()["evidence_ids"], ["evidence-1"])
+
+    def test_situation_normalizes_utc_and_rejects_invalid_temporal_and_identifier_data(self) -> None:
+        situation = Situation(
+            id=" situation-1 ",
+            situation_type=" activity_detected ",
+            started_at=NOW.astimezone(timezone(timedelta(hours=2))),
+            updated_at=(NOW + timedelta(minutes=1)).astimezone(timezone(timedelta(hours=2))),
+            confidence=0.3,
+            observation_ids=("observation-1",),
+            payload={"source_event_id": "event-1"},
+        )
+
+        self.assertEqual(situation.id, "situation-1")
+        self.assertEqual(situation.situation_type, "activity_detected")
+        self.assertEqual(situation.started_at, NOW)
+        self.assertEqual(situation.to_dict()["started_at"], "2026-09-28T12:00:00Z")
+        with self.assertRaisesRegex(ContractValidationError, "anterior"):
+            Situation(
+                id="situation-2",
+                situation_type="activity_detected",
+                started_at=NOW,
+                updated_at=NOW - timedelta(seconds=1),
+                confidence=0.3,
+            )
+        with self.assertRaisesRegex(ContractValidationError, "zona horaria"):
+            Situation(
+                id="situation-3",
+                situation_type="activity_detected",
+                started_at=datetime(2026, 1, 1, 10, 0),
+                updated_at=NOW,
+                confidence=0.3,
+            )
+        with self.assertRaisesRegex(ContractValidationError, "duplicados"):
+            Situation(
+                id="situation-4",
+                situation_type="activity_detected",
+                started_at=NOW,
+                updated_at=NOW,
+                confidence=0.3,
+                observation_ids=("observation-1", "observation-1"),
+            )
 
     def test_incident_rejects_an_update_before_its_start(self) -> None:
         with self.assertRaisesRegex(ContractValidationError, "anterior"):
