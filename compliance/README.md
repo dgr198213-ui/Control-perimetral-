@@ -23,3 +23,26 @@ Para bloquear de nuevo el sistema:
 ./scripts/disable-recording.sh
 docker compose up -d --force-recreate frigate notifier
 ```
+
+## Operaciones de WP3 mediante la API
+
+WP3 añade un ciclo explícito de cumplimiento en `control-api`. Todas las operaciones requieren una sesión autenticada y un motivo textual que queda en la auditoría append-only.
+
+```bash
+# Confirmar cartelería y encargo de tratamiento
+curl -b cookies.txt -X POST https://localhost:8443/api/compliance/confirm \
+  -H 'content-type: application/json' \
+  -d '{"reason":"Revisión documental completada"}'
+
+# Revocar y activar el kill-switch
+curl -b cookies.txt -X POST https://localhost:8443/api/compliance/revoke \
+  -H 'content-type: application/json' \
+  -d '{"reason":"Se retiró la autorización operativa"}'
+
+# Liberar el kill-switch requiere que ambas confirmaciones estén presentes
+curl -b cookies.txt -X POST https://localhost:8443/api/compliance/clear-kill-switch \
+  -H 'content-type: application/json' \
+  -d '{"reason":"Nueva revisión autorizada"}'
+```
+
+La revocación establece ambas confirmaciones a falso y activa el kill-switch. No se puede confirmar mientras el kill-switch permanezca activo, y tampoco se puede liberarlo sin ambas confirmaciones. El renderizador de Frigate sigue siendo fail-closed: mientras `recording_allowed` sea falso, `record.enabled` y `snapshots.enabled` permanecen desactivados.
