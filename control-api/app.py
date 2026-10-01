@@ -6,9 +6,12 @@ import os
 import secrets
 import sqlite3
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+import httpx
 from uuid import uuid4
 
 import yaml
@@ -100,11 +103,22 @@ def create_app(
     *,
     db_path: str | Path | None = None,
     encryption_key: str | None = None,
+    frigate_config_path: str | Path | None = None,
+    frigate_restart: Callable[[], None] | None = None,
     testing: bool = False,
 ) -> FastAPI:
     app = FastAPI(title="Control Perimetral API", version="2.0.0")
     app.state.db = Database(db_path or os.getenv("CONTROL_API_DB", "data/control-api.sqlite3"))
     app.state.encryption_key = encryption_key or os.getenv("CONTROL_API_ENCRYPTION_KEY")
+    app.state.frigate_config_path = Path(frigate_config_path or os.getenv("FRIGATE_CONFIG_PATH", "/config-generated/config.yml"))
+    frigate_api_url = os.getenv("FRIGATE_API_URL", "http://frigate:5000").rstrip("/")
+
+    def restart_frigate() -> None:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(f"{frigate_api_url}/api/restart")
+            response.raise_for_status()
+
+    app.state.frigate_restart = frigate_restart or restart_frigate
     app.state.testing = testing
 
     def current_user(request: Request, session: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> Any:
@@ -317,7 +331,7 @@ def create_app(
         return {"items": [row_dict(row) for row in rows]}
 
     @app.post("/api/frigate/render")
-    def render_frigate(request: Request, _user: Any = Depends(current_user)) -> dict[str, str]:
+    def render_frigate(request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
         db: Database = request.app.state.db
         compliance = db.one("SELECT * FROM compliance WHERE id = 1")
         allowed = bool(compliance["signage_confirmed"] and compliance["mandate_confirmed"] and not compliance["kill_switch"])
@@ -335,7 +349,28 @@ def create_app(
                 "ffmpeg": {"inputs": [{"path": f"{camera['transport']}://{camera['host']}:{camera['port']}/{camera['path'].lstrip('/')}", "roles": ["detect"]}]},
                 "zones": {zone["name"]: {"coordinates": ",".join(map(str, json.loads(zone["coordinates"]))), "objects": ["person", "car", "motorcycle", "bicycle"]} for zone in zones},
             }
-        return {"yaml": yaml.safe_dump(config, sort_keys=False), "recording_enabled": str(allowed).lower()}
+
+        rendered_yaml = yaml.safe_dump(config, sort_keys=False)
+        config_path: Path = request.app.state.frigate_config_path
+        temporary_path = config_path.with_name(f".{config_path.name}.{uuid4().hex}.tmp")
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with temporary_path.open("w", encoding="utf-8") as generated_file:
+                generated_file.write(rendered_yaml)
+                generated_file.flush()
+                os.fsync(generated_file.fileno())
+            os.replace(temporary_path, config_path)
+        except OSError as exc:
+            temporary_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail="No se pudo escribir la configuración de Frigate") from exc
+
+        try:
+            request.app.state.frigate_restart()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail="La configuración se guardó, pero Frigate no confirmó el reinicio") from exc
+
+        db.audit("apply", "frigate_config", str(config_path), {"user_id": user["id"], "recording_enabled": allowed})
+        return {"yaml": rendered_yaml, "recording_enabled": str(allowed).lower(), "applied": True}
 
     return app
 

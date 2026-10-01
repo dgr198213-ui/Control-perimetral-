@@ -17,10 +17,12 @@ Los archivos son marcadores, no copias de documentos. El contenido de las eviden
 
 | Componente | Función | Exposición |
 |---|---|---|
-| Frigate | Detección local, dashboard y NVR | Dashboard en `DASHBOARD_BIND_ADDRESS:5000`; por defecto solo localhost |
+| Caddy | Dashboard estático y proxy de `control-api` con TLS local | `https://CADDY_BIND_ADDRESS:8443`; HTTP en `:8080` solo redirige a HTTPS |
+| Frigate | Detección local y NVR | Solo red privada de Docker Compose; el puerto interno `5000` no se publica |
 | Mosquitto | Eventos MQTT internos | Solo red privada de Docker Compose; sin puerto publicado |
+| `control-api` | Configuración, sesión y aplicación de la configuración de Frigate | Solo a través de Caddy bajo `/api/*` |
 | Notificador | Filtrado por clase/zona y alerta textual | Salida HTTPS a Telegram únicamente cuando está desbloqueado |
-| `storage/` | Datos y clips locales | Volumen local, nunca sincronizado a la nube por este proyecto |
+| `storage/` y `data/` | Datos, clips y configuración local generada | Volúmenes locales, nunca sincronizados a la nube por este proyecto |
 
 Frigate utiliza clases genéricas (`person`, `car`, `motorcycle` y `bicycle`). La detección de drones **no está garantizada** y no se presenta como una capacidad disponible del modelo base.
 
@@ -35,7 +37,7 @@ chmod 600 .env
 
 Rellena `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID` solo en `.env`. El proyecto no envía vídeo, imágenes ni snapshots a Telegram; las alertas son texto con clase, cámara, zona y hora.
 
-Edita `frigate/config.yml` y sustituye las URLs RTSP de ejemplo por las cámaras autorizadas. Ajusta la resolución, FPS y el polígono de `zona_perimetro` desde el dashboard. No reutilices este proyecto para otra finca sin una revisión separada de permisos, zonas y documentación.
+La plantilla `frigate/config.template.yml` se copia una única vez a `data/frigate-config/config.yml` al iniciar el stack. No edites la plantilla para dar de alta cámaras: la configuración activa se genera desde `control-api`, que conserva los secretos fuera del YAML y aplica las cámaras y zonas autorizadas. No reutilices este proyecto para otra finca sin una revisión separada de permisos, zonas y documentación.
 
 ## Arranque seguro de pruebas
 
@@ -46,13 +48,19 @@ docker compose config
 docker compose up -d
 ```
 
-El dashboard estará en `http://127.0.0.1:5000` o en la IP LAN configurada en `DASHBOARD_BIND_ADDRESS`. Si se habilita el acceso desde la LAN, restringe el puerto con el firewall del mini-PC y no hagas port-forwarding a Internet.
+El dashboard y la API estarán en `https://localhost:8443`; el puerto `8080` solo redirige a HTTPS. `CADDY_HOSTNAME` debe ser exactamente el nombre o la IP que se usará en el navegador, porque identifica el certificado local. Para acceso LAN, establece `CADDY_HOSTNAME` y `CADDY_BIND_ADDRESS` con la IP LAN del mini-PC, restringe el puerto con el firewall y no hagas *port-forwarding* a Internet.
+
+Caddy emite un certificado mediante su CA local. Tras el primer arranque, instala `storage/caddy-data/caddy/pki/authorities/local/root.crt` en el almacén de autoridades de confianza del navegador y de cada móvil autorizado. Reinicia el navegador o la aplicación después de importarlo y accede siempre por HTTPS con el valor de `CADDY_HOSTNAME`. Esta CA sirve únicamente para este despliegue local: no la copies a dispositivos no controlados ni la publiques. Para una comprobación de línea de comandos, puedes usar el mismo certificado como CA:
+
+```bash
+curl --cacert storage/caddy-data/caddy/pki/authorities/local/root.crt https://localhost:8443/api/health
+```
 
 Puedes comprobar el bloqueo con:
 
 ```bash
-grep -A2 '^record:' frigate/config.yml
-grep -A2 '^snapshots:' frigate/config.yml
+grep -A2 '^record:' data/frigate-config/config.yml
+grep -A2 '^snapshots:' data/frigate-config/config.yml
 docker compose logs notifier
 ```
 
@@ -76,6 +84,12 @@ docker compose up -d --force-recreate frigate notifier
 ```
 
 La activación de grabación no sustituye la revisión de la base jurídica, los plazos de conservación, los derechos de las personas afectadas ni las obligaciones documentales aplicables. Este repositorio implementa controles técnicos y no constituye asesoramiento jurídico.
+
+## Aplicación de la configuración de Frigate
+
+`control-api` escribe de forma atómica el YAML renderizado en `data/frigate-config/config.yml`, un volumen que Frigate monta en modo de solo lectura. Después solicita `POST /api/restart` a `http://frigate:5000` dentro de la red privada de Compose. En Frigate `0.16.2`, esa ruta reinicia el proceso y permite que lea el archivo actualizado; el puerto interno no se publica y este flujo no monta ni utiliza `docker.sock`. [5]
+
+Si Frigate no confirma el reinicio, `POST /api/frigate/render` responde con `502` después de haber preservado el archivo generado. Revisa `docker compose logs frigate`, corrige el problema y vuelve a aplicar la configuración. Los scripts de activación y desactivación operan sobre el mismo archivo activo y requieren la recreación explícita indicada en sus mensajes.
 
 ## Privacidad y límites
 
@@ -118,3 +132,4 @@ python3 -m multisensor.api.app
 [2]: https://mosquitto.org/man/mosquitto-conf-5.html "Manual oficial de configuración de Mosquitto"
 [3]: https://core.telegram.org/bots/api#sendmessage "Telegram Bot API — sendMessage"
 [4]: https://docs.docker.com/compose/ "Documentación oficial de Docker Compose"
+[5]: https://github.com/blakeblackshear/frigate/blob/v0.16.2/frigate/api/app.py#L567-L584 "Frigate 0.16.2 — endpoint POST /api/restart"

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
+import httpx
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
@@ -14,8 +16,14 @@ from app import create_app  # noqa: E402
 KEY = Fernet.generate_key().decode()
 
 
-def make_client(tmp_path: Path) -> TestClient:
-    app = create_app(db_path=tmp_path / "control.sqlite3", encryption_key=KEY, testing=True)
+def make_client(tmp_path: Path, frigate_restart: Callable[[], None] | None = None) -> TestClient:
+    app = create_app(
+        db_path=tmp_path / "control.sqlite3",
+        encryption_key=KEY,
+        frigate_config_path=tmp_path / "frigate-config" / "config.yml",
+        frigate_restart=frigate_restart or (lambda: None),
+        testing=True,
+    )
     return TestClient(app)
 
 
@@ -74,6 +82,77 @@ def test_camera_zone_secret_and_rendering_never_return_password(tmp_path: Path) 
     assert rendered.status_code == 200
     assert "no-debe-salir" not in rendered.text
     assert "192.0.2.10" in rendered.json()["yaml"]
+
+
+def test_render_writes_generated_config_and_restarts_frigate(tmp_path: Path) -> None:
+    restarts: list[str] = []
+    client = make_client(tmp_path, frigate_restart=lambda: restarts.append("requested"))
+    setup = client.post("/api/auth/setup", json={"username": "demo", "password": "una-password-larga"})
+    assert setup.status_code == 201
+    assert client.post("/api/auth/login", json={"username": "demo", "password": "una-password-larga"}).status_code == 200
+
+    response = client.post("/api/frigate/render")
+
+    assert response.status_code == 200
+    assert response.json()["applied"] is True
+    assert restarts == ["requested"]
+    generated = (tmp_path / "frigate-config" / "config.yml").read_text()
+    assert generated == response.json()["yaml"]
+    assert "record:\n  enabled: false" in generated
+
+
+def test_render_calls_internal_frigate_restart_endpoint(tmp_path: Path, monkeypatch) -> None:
+    calls: list[tuple[str, float]] = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeClient:
+        def __init__(self, *, timeout: float) -> None:
+            self.timeout = timeout
+
+        def __enter__(self) -> "FakeClient":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, url: str) -> FakeResponse:
+            calls.append((url, self.timeout))
+            return FakeResponse()
+
+    monkeypatch.setenv("FRIGATE_API_URL", "http://frigate-interno:5000")
+    monkeypatch.setattr("app.httpx.Client", FakeClient)
+    app = create_app(
+        db_path=tmp_path / "control.sqlite3",
+        encryption_key=KEY,
+        frigate_config_path=tmp_path / "frigate-config" / "config.yml",
+        testing=True,
+    )
+    client = TestClient(app)
+    assert client.post("/api/auth/setup", json={"username": "demo", "password": "una-password-larga"}).status_code == 201
+    assert client.post("/api/auth/login", json={"username": "demo", "password": "una-password-larga"}).status_code == 200
+
+    response = client.post("/api/frigate/render")
+
+    assert response.status_code == 200
+    assert calls == [("http://frigate-interno:5000/api/restart", 10.0)]
+
+
+def test_render_reports_restart_failure_after_writing_config(tmp_path: Path) -> None:
+    def unavailable_frigate() -> None:
+        raise httpx.ConnectError("Frigate no disponible")
+
+    client = make_client(tmp_path, frigate_restart=unavailable_frigate)
+    setup = client.post("/api/auth/setup", json={"username": "demo", "password": "una-password-larga"})
+    assert setup.status_code == 201
+    assert client.post("/api/auth/login", json={"username": "demo", "password": "una-password-larga"}).status_code == 200
+
+    response = client.post("/api/frigate/render")
+
+    assert response.status_code == 502
+    assert (tmp_path / "frigate-config" / "config.yml").exists()
 
 
 def test_compliance_is_fail_closed_for_recording_and_audit_is_immutable(tmp_path: Path) -> None:
