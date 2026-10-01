@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG="$ROOT_DIR/frigate/config.yml"
+CONFIG="$ROOT_DIR/data/frigate-config/config.yml"
 python3 - "$CONFIG" <<'PY'
 from pathlib import Path
 import sys
