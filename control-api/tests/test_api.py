@@ -43,6 +43,16 @@ def test_health_is_public_and_auth_is_required(tmp_path: Path) -> None:
     assert client.get("/api/cameras").status_code == 401
 
 
+def test_metrics_exposes_prometheus_request_counter(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    client.get("/api/health")
+    response = client.get("/api/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert 'control_api_requests_total{method="GET",path="/api/health",status="200"}' in response.text
+
+
 def test_single_user_setup_and_login_cookie(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     assert client.post("/api/auth/setup", json={"username": "demo", "password": "una-password-larga"}).status_code == 201

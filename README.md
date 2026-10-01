@@ -99,6 +99,22 @@ El procesamiento de vídeo se realiza dentro del mini-PC y el stack no publica e
 
 Las cámaras deben apuntar únicamente al perímetro autorizado. No uses el sistema para vigilar espacios públicos, viviendas colindantes o zonas ajenas a la finca. Revisa periódicamente los logs, el almacenamiento y las reglas de retención, y elimina los datos cuando venza el plazo definido por el responsable.
 
+## Estado actual de la evolución del producto
+
+La rama `main` incorpora ya los primeros bloques del roadmap de producto:
+
+| Capacidad | Implementación |
+|---|---|
+| Recuperación | `scripts/backup.sh`, `scripts/restore.sh` y `scripts/sqlite_backup.py` crean y verifican copias consistentes de SQLite, configuración generada y evidencias locales. |
+| Salud multisensor | `GET /api/multisensor/health` informa de la frescura de observaciones por sensor. |
+| Persistencia de dominio | `SQLiteDomainRepository` conserva situaciones e incidentes derivados con reconstrucción de contratos y rechazo de IDs duplicados. |
+| Políticas | `PolicyEngine` devuelve decisiones explicables con motivo, versión y *cooldown*. |
+| Acciones | `ActionQueue` ofrece deduplicación, estados, reintentos con *backoff* y *dead letter* sin acoplarse a Telegram. |
+| Contexto | `ContextEngine` añade horario, zona, actividad reciente y persistencia sin ML. |
+| Dashboard | `dashboard/` proporciona una interfaz local para login, estado, recursos, recomendaciones, salud de sensores y perfil de protección. |
+
+El dashboard sigue siendo deliberadamente pequeño y local. Cesium continúa reservado para la vista espacial avanzada; la interfaz principal no muestra scores técnicos ni detalles de MQTT o RTSP.
+
 ## Protección orientada al usuario
 
 La API de control incorpora un único **perfil de protección** persistente para expresar el tipo de sitio, el nivel de protección, los objetivos de detección, la protección nocturna, los avisos y las horas tranquilas. Los valores por defecto priorizan personas y vehículos, mantienen el modo equilibrado y no activan la detección de animales. Las rutas requieren una sesión autenticada y las modificaciones quedan registradas en el *audit log*.

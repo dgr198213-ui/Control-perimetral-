@@ -23,6 +23,7 @@ from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response, 
 from pydantic import BaseModel, Field
 
 from db import Database, utc_now
+from metrics import Metrics
 from protection import (
     CameraResources,
     DiscoveredCamera,
@@ -150,6 +151,13 @@ def create_app(
     testing: bool = False,
 ) -> FastAPI:
     app = FastAPI(title="Control Perimetral API", version="2.0.0")
+    app.state.metrics = Metrics()
+
+    @app.middleware("http")
+    async def collect_metrics(request: Request, call_next):
+        response = await call_next(request)
+        request.app.state.metrics.observe_request(request.method, request.url.path, response.status_code)
+        return response
     app.state.db = Database(db_path or os.getenv("CONTROL_API_DB", "data/control-api.sqlite3"))
     app.state.encryption_key = encryption_key or os.getenv("CONTROL_API_ENCRYPTION_KEY")
     app.state.frigate_config_path = Path(frigate_config_path or os.getenv("FRIGATE_CONFIG_PATH", "/config-generated/config.yml"))
@@ -200,6 +208,14 @@ def create_app(
         if row is None or not (row["signage_confirmed"] and row["mandate_confirmed"]) or row["kill_switch"]:
             raise HTTPException(status_code=423, detail="Operación bloqueada por cumplimiento")
         return row
+
+    @app.get("/api/metrics")
+    def metrics(request: Request) -> Response:
+        return Response(
+            content=request.app.state.metrics.render(),
+            media_type="text/plain; version=0.0.4",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
