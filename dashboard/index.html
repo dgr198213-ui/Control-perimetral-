@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
+    <title>Control perimetral</title>
+    <link rel="stylesheet" href="/dashboard/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">CONTROL PERIMETRAL</p>
+          <h1>Protección del sitio</h1>
+        </div>
+        <button id="refresh-button" class="button secondary" type="button">Actualizar</button>
+      </header>
+
+      <section id="login-panel" class="panel login-panel" aria-labelledby="login-title">
+        <div>
+          <p class="eyebrow">ACCESO LOCAL</p>
+          <h2 id="login-title">Inicia sesión para gestionar la protección</h2>
+          <p class="muted">La configuración se mantiene dentro del despliegue local.</p>
+        </div>
+        <form id="login-form" class="stack">
+          <label>Usuario<input name="username" autocomplete="username" required></label>
+          <label>Contraseña<input name="password" type="password" autocomplete="current-password" minlength="12" required></label>
+          <button class="button primary" type="submit">Entrar</button>
+          <p id="login-error" class="error" role="alert"></p>
+        </form>
+      </section>
+
+      <section id="app-panel" hidden>
+        <section id="protection-card" class="hero-card" aria-live="polite">
+          <div>
+            <p class="eyebrow">ESTADO DE PROTECCIÓN</p>
+            <h2 id="protection-status">Cargando…</h2>
+            <p id="protection-summary" class="hero-summary"></p>
+          </div>
+          <div id="protection-mark" class="status-mark" aria-hidden="true">●</div>
+        </section>
+
+        <div class="grid two-columns">
+          <section class="panel" aria-labelledby="resources-title">
+            <div class="panel-heading"><h2 id="resources-title">Recursos disponibles</h2><span id="integration-state" class="badge">—</span></div>
+            <div id="resource-list" class="resource-list"></div>
+          </section>
+          <section class="panel" aria-labelledby="recommendations-title">
+            <div class="panel-heading"><h2 id="recommendations-title">Siguiente paso</h2></div>
+            <div id="recommendations" class="recommendations"></div>
+          </section>
+        </div>
+
+        <section class="panel" aria-labelledby="profile-title">
+          <div class="panel-heading"><h2 id="profile-title">Configuración sencilla</h2><span class="muted">Perfil de protección</span></div>
+          <form id="profile-form" class="profile-grid">
+            <label>¿Qué proteges?
+              <select name="site_type"><option value="property">Casa</option><option value="farm">Finca</option><option value="land">Terreno</option><option value="warehouse">Almacén</option><option value="business">Negocio</option></select>
+            </label>
+            <label>Nivel de protección
+              <select name="protection_mode"><option value="quiet">Tranquila</option><option value="balanced">Equilibrada</option><option value="strict">Estrica</option></select>
+            </label>
+            <fieldset><legend>Qué vigilar</legend><label class="check"><input name="detect_people" type="checkbox"> Personas</label><label class="check"><input name="detect_vehicles" type="checkbox"> Vehículos</label><label class="check"><input name="detect_animals" type="checkbox"> Animales</label><label class="check"><input name="night_protection" type="checkbox"> Actividad nocturna</label></fieldset>
+            <fieldset><legend>Avisos</legend><label class="check"><input name="notify_on_suspicious" type="checkbox"> Actividad sospechosa</label><label class="check"><input name="notify_on_incident" type="checkbox"> Incidente confirmado</label></fieldset>
+            <div class="form-actions"><button class="button primary" type="submit">Guardar configuración</button><p id="profile-message" class="muted" role="status"></p></div>
+          </form>
+        </section>
+
+        <section class="panel" aria-labelledby="health-title">
+          <div class="panel-heading"><h2 id="health-title">Salud de sensores</h2><span class="muted">Frescura de observaciones</span></div>
+          <div id="health-list" class="health-list"></div>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="/dashboard/app.js"></script>
+  </body>
+</html>
