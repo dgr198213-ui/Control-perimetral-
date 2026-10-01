@@ -90,6 +90,31 @@ MIGRATIONS = (
         END;
         """,
     ),
+    (
+        2,
+        "user-centered-protection",
+        """
+        CREATE TABLE protection_profile (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            site_type TEXT NOT NULL DEFAULT 'property'
+                CHECK (site_type IN ('property', 'farm', 'land', 'warehouse', 'business')),
+            protection_mode TEXT NOT NULL DEFAULT 'balanced'
+                CHECK (protection_mode IN ('quiet', 'balanced', 'strict')),
+            detect_people INTEGER NOT NULL DEFAULT 1 CHECK (detect_people IN (0, 1)),
+            detect_vehicles INTEGER NOT NULL DEFAULT 1 CHECK (detect_vehicles IN (0, 1)),
+            detect_animals INTEGER NOT NULL DEFAULT 0 CHECK (detect_animals IN (0, 1)),
+            night_protection INTEGER NOT NULL DEFAULT 1 CHECK (night_protection IN (0, 1)),
+            notify_on_suspicious INTEGER NOT NULL DEFAULT 1 CHECK (notify_on_suspicious IN (0, 1)),
+            notify_on_incident INTEGER NOT NULL DEFAULT 1 CHECK (notify_on_incident IN (0, 1)),
+            quiet_hours_start TEXT,
+            quiet_hours_end TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO protection_profile(id, created_at, updated_at)
+        VALUES (1, datetime('now'), datetime('now'));
+        """,
+    ),
 )
 
 
