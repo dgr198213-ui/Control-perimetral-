@@ -82,6 +82,10 @@ class ComplianceView(BaseModel):
     updated_at: str
 
 
+class ComplianceReason(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -223,6 +227,42 @@ def create_app(
     def get_compliance(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
         row = request.app.state.db.one("SELECT * FROM compliance WHERE id = 1")
         return {**row_dict(row), "recording_allowed": bool(row["signage_confirmed"] and row["mandate_confirmed"] and not row["kill_switch"])}
+
+    @app.post("/api/compliance/confirm", response_model=ComplianceView)
+    def confirm_compliance(body: ComplianceReason, request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
+        db: Database = request.app.state.db
+        row = db.one("SELECT * FROM compliance WHERE id = 1")
+        if row["kill_switch"]:
+            raise HTTPException(status_code=423, detail="El kill-switch está activo; libéralo explícitamente antes de confirmar")
+        db.execute(
+            "UPDATE compliance SET signage_confirmed = 1, mandate_confirmed = 1, updated_at = ? WHERE id = 1",
+            (utc_now(),),
+        )
+        db.audit("confirm", "compliance", "1", {"user_id": user["id"], "reason": body.reason})
+        updated = db.one("SELECT * FROM compliance WHERE id = 1")
+        return {**row_dict(updated), "recording_allowed": True}
+
+    @app.post("/api/compliance/revoke", response_model=ComplianceView)
+    def revoke_compliance(body: ComplianceReason, request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
+        db: Database = request.app.state.db
+        db.execute(
+            "UPDATE compliance SET signage_confirmed = 0, mandate_confirmed = 0, kill_switch = 1, updated_at = ? WHERE id = 1",
+            (utc_now(),),
+        )
+        db.audit("revoke", "compliance", "1", {"user_id": user["id"], "reason": body.reason})
+        updated = db.one("SELECT * FROM compliance WHERE id = 1")
+        return {**row_dict(updated), "recording_allowed": False}
+
+    @app.post("/api/compliance/clear-kill-switch", response_model=ComplianceView)
+    def clear_kill_switch(body: ComplianceReason, request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
+        db: Database = request.app.state.db
+        row = db.one("SELECT * FROM compliance WHERE id = 1")
+        if not (row["signage_confirmed"] and row["mandate_confirmed"]):
+            raise HTTPException(status_code=423, detail="No se puede liberar el kill-switch sin ambas confirmaciones")
+        db.execute("UPDATE compliance SET kill_switch = 0, updated_at = ? WHERE id = 1", (utc_now(),))
+        db.audit("clear_kill_switch", "compliance", "1", {"user_id": user["id"], "reason": body.reason})
+        updated = db.one("SELECT * FROM compliance WHERE id = 1")
+        return {**row_dict(updated), "recording_allowed": True}
 
     @app.get("/api/cameras")
     def list_cameras(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:

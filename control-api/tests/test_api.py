@@ -177,3 +177,38 @@ def test_compliance_is_fail_closed_for_recording_and_audit_is_immutable(tmp_path
         raise AssertionError("audit_log permitió DELETE")
     finally:
         connection.close()
+
+
+def test_compliance_confirmation_revocation_and_kill_switch_lifecycle(tmp_path: Path) -> None:
+    client = authenticated_client(tmp_path)
+
+    confirmed = client.post("/api/compliance/confirm", json={"reason": "Revisión documental completada"})
+    assert confirmed.status_code == 200
+    assert confirmed.json()["recording_allowed"] is True
+    assert confirmed.json()["kill_switch"] is False
+
+    revoked = client.post("/api/compliance/revoke", json={"reason": "Se retiró la autorización operativa"})
+    assert revoked.status_code == 200
+    assert revoked.json()["recording_allowed"] is False
+    assert revoked.json()["kill_switch"] is True
+
+    blocked_confirmation = client.post("/api/compliance/confirm", json={"reason": "Intento prematuro"})
+    assert blocked_confirmation.status_code == 423
+
+    blocked_clear = client.post("/api/compliance/clear-kill-switch", json={"reason": "No hay confirmaciones"})
+    assert blocked_clear.status_code == 423
+
+    connection = sqlite3.connect(tmp_path / "control.sqlite3")
+    connection.execute(
+        "UPDATE compliance SET signage_confirmed = 1, mandate_confirmed = 1 WHERE id = 1"
+    )
+    connection.commit()
+    connection.close()
+
+    cleared = client.post("/api/compliance/clear-kill-switch", json={"reason": "Nueva revisión autorizada"})
+    assert cleared.status_code == 200
+    assert cleared.json()["recording_allowed"] is True
+    assert cleared.json()["kill_switch"] is False
+
+    audit = client.get("/api/audit").json()["items"]
+    assert [entry["action"] for entry in audit[-3:]] == ["confirm", "revoke", "clear_kill_switch"]
