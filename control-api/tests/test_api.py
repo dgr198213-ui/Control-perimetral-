@@ -314,3 +314,38 @@ def test_protection_status_reports_attention_for_unzoned_camera(tmp_path: Path) 
     assert status_response["status"] == "attention"
     assert status_response["capabilities"]["cameras"] is True
     assert status_response["recording_allowed"] is True
+
+
+def test_protection_discovery_reports_only_persisted_resources(tmp_path: Path) -> None:
+    client = authenticated_client(tmp_path)
+    unauthenticated = make_client(tmp_path).get("/api/protection/discovery")
+    assert unauthenticated.status_code == 401
+
+    empty = client.get("/api/protection/discovery")
+    assert empty.status_code == 200
+    assert empty.json()["resources"]["cameras"] == {"configured": False, "count": 0, "active_count": 0, "items": []}
+    assert empty.json()["integrations"]["frigate"]["status"] == "not_verified"
+    assert empty.json()["integrations"]["mqtt"]["status"] == "not_verified"
+
+    created = client.post(
+        "/api/cameras",
+        json={
+            "name": "entrada",
+            "host": "192.0.2.30",
+            "path": "stream",
+            "username": "demo",
+            "password": "secreto-de-prueba",
+        },
+    )
+    assert created.status_code == 201
+    camera_id = created.json()["id"]
+    zone = client.post(f"/api/cameras/{camera_id}/zones", json={"name": "puerta", "coordinates": [0, 0, 1, 0, 1, 1]})
+    assert zone.status_code == 201
+    rule = client.post("/api/notification-rules", json={"class_name": "person"})
+    assert rule.status_code == 201
+
+    discovery = client.get("/api/protection/discovery").json()
+    assert discovery["resources"]["cameras"]["count"] == 1
+    assert discovery["resources"]["cameras"]["active_count"] == 1
+    assert discovery["resources"]["zones"]["count"] == 1
+    assert discovery["resources"]["notification_rules"]["active_count"] == 1

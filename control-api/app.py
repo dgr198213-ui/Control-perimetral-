@@ -300,6 +300,46 @@ def create_app(
     def get_protection_status(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
         return protection_status(request.app.state.db)
 
+    @app.get("/api/protection/discovery")
+    def get_protection_discovery(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
+        db: Database = request.app.state.db
+        cameras = db.many("SELECT id, name, enabled FROM cameras ORDER BY name")
+        zones = db.many("SELECT id, camera_id, name FROM zones ORDER BY name")
+        rules = db.many("SELECT id, class_name, enabled FROM notification_rules ORDER BY id")
+        enabled_cameras = [row for row in cameras if row["enabled"]]
+        enabled_rules = [row for row in rules if row["enabled"]]
+        return {
+            "resources": {
+                "cameras": {
+                    "configured": bool(cameras),
+                    "count": len(cameras),
+                    "active_count": len(enabled_cameras),
+                    "items": [{"id": row["id"], "name": row["name"], "enabled": bool(row["enabled"])} for row in cameras],
+                },
+                "zones": {
+                    "configured": bool(zones),
+                    "count": len(zones),
+                    "items": [{"id": row["id"], "camera_id": row["camera_id"], "name": row["name"]} for row in zones],
+                },
+                "notification_rules": {
+                    "configured": bool(rules),
+                    "count": len(rules),
+                    "active_count": len(enabled_rules),
+                    "items": [{"id": row["id"], "class_name": row["class_name"], "enabled": bool(row["enabled"])} for row in rules],
+                },
+            },
+            "integrations": {
+                "frigate": {
+                    "status": "not_verified",
+                    "reason": "El endpoint no realiza una comprobación de red; muestra únicamente recursos gestionados localmente.",
+                },
+                "mqtt": {
+                    "status": "not_verified",
+                    "reason": "No existe una configuración de conexión persistida en control-api.",
+                },
+            },
+        }
+
     @app.get("/api/protection/recommendations")
     def get_protection_recommendations(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
         db: Database = request.app.state.db
