@@ -89,3 +89,20 @@ npm run dev
 ```
 
 La integración visual no sustituye la configuración de `src/cameras.config.js`: para Frigate, el pulso sigue representando la posición de la cámara y no la posición exacta del objeto detectado. Del mismo modo, una observación o incidente solo aparece geolocalizado si el contrato del backend incluye `location` válida. Cesium no envía Telegram, no publica webhooks y no aplica el Policy Engine.
+
+## Capas satelitales y cámaras de tráfico
+
+El visor usa una base de imágenes satelitales Esri World Imagery. Esta capa no es vídeo en directo: la fecha de adquisición y la actualización dependen del proveedor, y la interfaz lo indica explícitamente.
+
+El botón **Mostrar cámaras DGT** carga el catálogo público oficial [Cameras DGT DATEX2 v3.7](https://nap.dgt.es/en/dataset/camaras-dgt-datex2-v3-7). La publicación se consulta por HTTPS, contiene coordenadas y referencias a imágenes públicas, y documenta una actualización aproximada cada hora. El visor muestra esas imágenes como marcadores bajo demanda; no accede a cámaras privadas ni garantiza continuidad de servicio.
+
+La fuente DGT cubre carreteras españolas salvo País Vasco y Cataluña. Es una fuente pública de tráfico, no una fuente de vigilancia del perímetro privado. Las cámaras propias de Frigate y los eventos del perímetro permanecen separados de esta capa.
+
+El catálogo DGT se cachea en `sessionStorage` durante una hora para evitar descargas repetitivas. Si la fuente no está disponible, el mapa conserva las demás capas y muestra el error en el panel de estado.
+
+La cartografía y las fuentes conservan atribución visible. No se deben usar las teselas estándar de OpenStreetMap como un servicio ilimitado: sus servidores requieren URL HTTPS, atribución, identificación y cacheo respetuoso [1]. La capa oficial española PNOA/IGN también puede configurarse posteriormente mediante WMTS; sus ortofotos se actualizan varias veces al año y las imágenes Sentinel-2 aproximadamente dos veces al año [2].
+
+### Fuentes
+
+[1]: https://operations.osmfoundation.org/policies/tiles/ "OpenStreetMap Tile Usage Policy"
+[2]: https://data.europa.eu/data/datasets/spaignwmts_pnoa-ma?locale=en "WMTS of Orthoimages of Spain — PNOA and Sentinel-2"

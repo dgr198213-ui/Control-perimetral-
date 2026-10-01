@@ -26,6 +26,29 @@
         border-radius: 6px;
         max-width: 360px;
       }
+      #mapControls {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        z-index: 10;
+        display: grid;
+        gap: 6px;
+        font: 12px monospace;
+        color: #e7f0ff;
+        background: rgba(0,0,0,0.72);
+        padding: 9px;
+        border-radius: 6px;
+        max-width: 330px;
+      }
+      #mapControls button {
+        cursor: pointer;
+        border: 1px solid #52739e;
+        border-radius: 4px;
+        padding: 6px 8px;
+        background: #182b45;
+        color: #fff;
+      }
+      #mapControls small { color: #b8d8ff; line-height: 1.35; }
       #eventFeed {
         position: absolute;
         top: 10px;
@@ -65,6 +88,14 @@
   <body>
     <div id="cesiumContainer"></div>
     <div id="multisensorStatus">Multisensor: conectando…</div>
+    <div id="mapControls">
+      <button id="toggleTraffic" data-visible="false" type="button">Mostrar cámaras DGT</button>
+      <button id="refreshTraffic" type="button">Actualizar catálogo DGT</button>
+      <small id="satelliteStatus">Cargando capa satelital…</small>
+      <small id="trafficStatus">Cámaras DGT: cargando…</small>
+      <small>La capa DGT muestra imágenes públicas; no accede a cámaras privadas ni garantiza vídeo continuo.</small>
+      <small>© Esri World Imagery · © DGT · <a href="https://nap.dgt.es/en/dataset/camaras-dgt-datex2-v3-7" target="_blank" rel="noreferrer">fuente DGT</a></small>
+    </div>
     <div id="eventFeed">Esperando eventos de Frigate y del núcleo multisensor…</div>
     <script type="module" src="/src/main.js"></script>
   </body>
