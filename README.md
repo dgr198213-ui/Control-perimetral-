@@ -99,6 +99,21 @@ El procesamiento de vídeo se realiza dentro del mini-PC y el stack no publica e
 
 Las cámaras deben apuntar únicamente al perímetro autorizado. No uses el sistema para vigilar espacios públicos, viviendas colindantes o zonas ajenas a la finca. Revisa periódicamente los logs, el almacenamiento y las reglas de retención, y elimina los datos cuando venza el plazo definido por el responsable.
 
+## Protección orientada al usuario
+
+La API de control incorpora un único **perfil de protección** persistente para expresar el tipo de sitio, el nivel de protección, los objetivos de detección, la protección nocturna, los avisos y las horas tranquilas. Los valores por defecto priorizan personas y vehículos, mantienen el modo equilibrado y no activan la detección de animales. Las rutas requieren una sesión autenticada y las modificaciones quedan registradas en el *audit log*.
+
+| Ruta | Función |
+|---|---|
+| `GET /api/protection-profile` | Consulta el perfil de protección activo. |
+| `PUT /api/protection-profile` | Actualiza el perfil tras validar valores, horarios y tipos. |
+| `GET /api/protection/status` | Devuelve un estado comprensible (`setup_required`, `attention` o `protected`) basado en cámaras, zonas, reglas y cumplimiento existentes. |
+| `GET /api/protection/recommendations` | Devuelve recomendaciones deterministas respaldadas por el estado real de la configuración. |
+
+El núcleo multisensor añade el contrato inmutable `Situation` y un `SituationEngine` puro que clasifica un `Event` como `activity_detected` o `suspicious_activity` usando la confianza que ya calcula la correlación. El motor no persiste, no envía notificaciones, no crea acciones y no convierte automáticamente una situación en incidente.
+
+> El repositorio no contiene todavía una implementación funcional del dashboard: `dashboard/` solo conserva un marcador. Por ello, esta entrega expone la configuración y el estado mediante la API, sin presentar una interfaz nueva ni alterar el visor 3D opcional.
+
 ## API HTTP multisensor
 
 El núcleo multisensor expone una API HTTP de solo lectura mediante `multisensor.api`. La auditoría del repositorio no encontró un framework HTTP existente; por eso esta primera versión usa Flask únicamente como adaptador de transporte, sin duplicar reglas de correlación, fusión o incidentes.
