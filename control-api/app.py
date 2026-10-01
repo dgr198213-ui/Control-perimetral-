@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from db import Database, utc_now
 from metrics import Metrics
+from public_sources import list_public_sources
 from protection import (
     CameraResources,
     DiscoveredCamera,
@@ -216,6 +217,10 @@ def create_app(
             media_type="text/plain; version=0.0.4",
             headers={"Cache-Control": "no-store"},
         )
+
+    @app.get("/api/public-sources")
+    def public_sources(_user: Any = Depends(current_user)) -> dict[str, Any]:
+        return {"items": list_public_sources(), "count": len(list_public_sources())}
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

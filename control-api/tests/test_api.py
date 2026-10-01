@@ -441,3 +441,17 @@ def test_discovery_probes_report_reachable_integrations_without_exposing_endpoin
     }
     assert "http://" not in response.text
     assert "mosquitto" not in response.text
+
+
+def test_public_sources_catalog_is_authenticated_and_privacy_scoped(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    assert client.get("/api/public-sources").status_code == 401
+    authenticated = authenticated_client(tmp_path)
+    response = authenticated.get("/api/public-sources")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] >= 3
+    assert any(item["id"] == "dgt-traffic-cameras" and item["status"] == "integrated" for item in payload["items"])
+    assert all(item["personal_tracking"] is False for item in payload["items"])
+    assert "TELEGRAM_BOT_TOKEN" not in response.text
+    assert "bssid" not in response.text.lower()

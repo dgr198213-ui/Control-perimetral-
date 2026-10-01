@@ -195,3 +195,13 @@ python3 -m multisensor.api.app
 [3]: https://core.telegram.org/bots/api#sendmessage "Telegram Bot API — sendMessage"
 [4]: https://docs.docker.com/compose/ "Documentación oficial de Docker Compose"
 [5]: https://github.com/blakeblackshear/frigate/blob/v0.16.2/frigate/api/app.py#L567-L584 "Frigate 0.16.2 — endpoint POST /api/restart"
+
+## Recursos públicos y privacidad
+
+Se incorporó `GET /api/public-sources`, autenticado y de solo lectura, para describir fuentes públicas disponibles sin convertirlas en un sistema de seguimiento individual. Incluye el catálogo DGT integrado, PNOA/IGN como capa cartográfica configurable, OpenStreetMap con sus restricciones de uso y una entrada experimental para WiFi-CSI local autorizado.
+
+La investigación recibida distingue correctamente entre datos de infraestructura, sensores autorizados y técnicas que pueden identificar o localizar dispositivos o personas. El sistema adopta únicamente el primer grupo y señales propias del perímetro. No se integran WiGLE, OpenCelliD, números de teléfono, BSSID/MAC, IMEI/IMSI, reconocimiento facial, matrículas, redes sociales ni triangulación de terceros. Aunque algunas de esas fuentes sean públicamente accesibles, su uso puede crear perfiles personales, superar la autorización del sitio o introducir una base de datos de localización de personas.
+
+El módulo `multisensor.privacy` añade `PublicResourcePolicy` y `sanitize_public_resource`: redondea coordenadas públicas, limita la retención y rechaza identificadores personales o de dispositivo. Las pruebas cubren el rechazo de BSSID y otros identificadores sensibles.
+
+La propuesta de WiFi-CSI, BLE, radar mmWave, RFID, UWB y fotogrametría queda clasificada como **experimental**. Solo se implementará mediante sensores instalados y autorizados por el responsable, con datos agregados, sin identificación de terceros y con una política de retención explícita. No se presenta como capacidad operativa del MVP.
