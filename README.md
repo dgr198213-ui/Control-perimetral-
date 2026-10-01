@@ -239,3 +239,20 @@ O puede enviar únicamente tres mediciones de distancia; la API utilizará las a
 ```
 
 El endpoint es `POST /api/multisensor/wifi-csi` y permanece protegido por el bloqueo de cumplimiento. El sistema valida que el identificador empiece por `wifi-csi-`, que existan tres anclas no colineales y que las distancias sean positivas. La posición resultante se conserva en `Observation.payload.position`; no se convierte artificialmente a latitud/longitud.
+
+## Publicación automática WiFi-CSI cada 3 segundos
+
+El stack incluye ahora `wifi-csi-gateway`, un proceso autónomo que ejecuta un ciclo cada tres segundos. En cada ciclo consulta `WIFI_CSI_SOURCE_URL`, valida que la fuente solo entregue `position` o `measurements`, publica el resultado en `multisensor-api`, evita duplicar payloads idénticos y registra su estado en `data/wifi-csi/wifi-csi-gateway.json`.
+
+Configure la fuente del gateway en `.env`:
+
+```env
+WIFI_CSI_SOURCE_URL=http://gateway-hardware.local/position
+WIFI_CSI_INTERVAL_SECONDS=3
+WIFI_CSI_TIMEOUT_SECONDS=2
+WIFI_CSI_SENSOR_ID=wifi-csi-01
+```
+
+El endpoint de estado es `GET /api/multisensor/wifi-csi/health`. Devuelve `waiting` hasta que llega la primera observación y `ok` cuando existe una posición persistida. Si la fuente no está configurada o falla, el gateway permanece activo en estado `degraded`, registra el error y vuelve a intentarlo en el ciclo siguiente; no genera posiciones inventadas.
+
+El arranque completo incorpora `multisensor-api` y el gateway en Docker Compose. La fuente de hardware sigue siendo necesaria: el software automatiza el ciclo, la validación, la deduplicación, la persistencia y los reintentos, pero no puede fabricar mediciones WiFi-CSI sin un gateway o sensor propio instalado.

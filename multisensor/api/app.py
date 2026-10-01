@@ -124,6 +124,12 @@ def create_app(
     def get_incident(incident_id: str):
         return resource_or_404(incident_repository.get(incident_id), "incidente")
 
+    @app.get("/api/multisensor/wifi-csi/health")
+    def wifi_csi_health():
+        wifi_items = [item for item in observation_repository.all() if item.sensor_type == "wifi_csi"]
+        latest = max((item.timestamp for item in wifi_items), default=None)
+        return jsonify({"status": "ok" if latest is not None else "waiting", "observation_count": len(wifi_items), "last_observation": latest.isoformat().replace("+00:00", "Z") if latest else None}), 200
+
     @app.get("/api/multisensor/health")
     def sensor_health():
         health = SensorHealthService().evaluate(observation_repository.all())
