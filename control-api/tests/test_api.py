@@ -98,6 +98,7 @@ def test_render_writes_generated_config_and_restarts_frigate(tmp_path: Path) -> 
     assert restarts == ["requested"]
     generated = (tmp_path / "frigate-config" / "config.yml").read_text()
     assert generated == response.json()["yaml"]
+    assert "version: 0.16-0" in generated
     assert "record:\n  enabled: false" in generated
 
 

@@ -337,6 +337,7 @@ def create_app(
         allowed = bool(compliance["signage_confirmed"] and compliance["mandate_confirmed"] and not compliance["kill_switch"])
         cameras = db.many("SELECT * FROM cameras WHERE enabled = 1 ORDER BY id")
         config: dict[str, Any] = {
+            "version": "0.16-0",
             "mqtt": {"host": "mosquitto", "port": 1883},
             "objects": {"track": ["person", "car", "motorcycle", "bicycle"]},
             "record": {"enabled": allowed},

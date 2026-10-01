@@ -87,7 +87,9 @@ La activación de grabación no sustituye la revisión de la base jurídica, los
 
 ## Aplicación de la configuración de Frigate
 
-`control-api` escribe de forma atómica el YAML renderizado en `data/frigate-config/config.yml`, un volumen que Frigate monta en modo de solo lectura. Después solicita `POST /api/restart` a `http://frigate:5000` dentro de la red privada de Compose. En Frigate `0.16.2`, esa ruta reinicia el proceso y permite que lea el archivo actualizado; el puerto interno no se publica y este flujo no monta ni utiliza `docker.sock`. [5]
+`control-api` escribe de forma atómica el YAML renderizado en `data/frigate-config/config.yml`. Frigate monta ese directorio en `/config-generated` en modo de solo lectura y recibe `CONFIG_FILE=/config-generated/config.yml`; Frigate 0.16.2 resuelve explícitamente esa variable antes de usar `/config/config.yml` como valor predeterminado. Después, `control-api` solicita `POST /api/restart` a `http://frigate:5000` dentro de la red privada de Compose. El puerto interno no se publica y este flujo no monta ni utiliza `docker.sock`. [5]
+
+La configuración generada incluye `version: 0.16-0`, por lo que Frigate no necesita migrarla. En el arranque puede aparecer el mensaje `Config file is read-only, unable to migrate config file.` porque el volumen es deliberadamente de solo lectura para Frigate; la validación funcional se considera correcta cuando el contenedor permanece saludable y los logs muestran `Starting Frigate (0.16.2-...)`.
 
 Si Frigate no confirma el reinicio, `POST /api/frigate/render` responde con `502` después de haber preservado el archivo generado. Revisa `docker compose logs frigate`, corrige el problema y vuelve a aplicar la configuración. Los scripts de activación y desactivación operan sobre el mismo archivo activo y requieren la recreación explícita indicada en sus mensajes.
 

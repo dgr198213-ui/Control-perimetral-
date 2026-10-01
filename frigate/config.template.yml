@@ -1,4 +1,5 @@
-# Plantilla base sin cámaras. control-api generará frigate/config.yml en WP2.
+# Plantilla base sin cámaras. control-api generará data/frigate-config/config.yml.
+version: 0.16-0
 mqtt:
   host: mosquitto
   port: 1883
@@ -15,3 +16,6 @@ record:
 
 snapshots:
   enabled: false
+
+# Frigate 0.16.2 exige declarar el mapa, aunque inicialmente esté vacío.
+cameras: {}
