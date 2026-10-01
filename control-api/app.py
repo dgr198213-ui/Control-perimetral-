@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import secrets
+import socket
 import sqlite3
 import time
 from collections.abc import Callable
@@ -22,12 +23,48 @@ from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response, 
 from pydantic import BaseModel, Field
 
 from db import Database, utc_now
-from protection import ProtectionProfile, protection_profile_from_row
+from protection import (
+    CameraResources,
+    DiscoveredCamera,
+    DiscoveredNotificationRule,
+    DiscoveredZone,
+    IntegrationDiscovery,
+    NotificationRuleResources,
+    ProtectionDiscoveryResponse,
+    ProtectionProfile,
+    ZoneResources,
+    protection_profile_from_row,
+)
 
 SESSION_COOKIE = "perimetral_session"
 SESSION_TTL_HOURS = 12
 PASSWORDS = PasswordHasher()
 LOGIN_FAILURES: dict[str, list[float]] = {}
+DISCOVERY_TIMEOUT_SECONDS = 2.0
+MAX_DISCOVERY_ITEMS = 1000
+
+
+def probe_frigate(base_url: str, *, timeout: float = DISCOVERY_TIMEOUT_SECONDS) -> IntegrationDiscovery:
+    """Comprueba el endpoint de versión interno sin devolver detalles de red."""
+
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            response = client.get(f"{base_url.rstrip('/')}/api/version")
+        if response.is_success:
+            return IntegrationDiscovery(status="reachable", reason="Frigate respondió correctamente.")
+        return IntegrationDiscovery(status="unavailable", reason="Frigate respondió con un estado no válido.")
+    except httpx.HTTPError:
+        return IntegrationDiscovery(status="unavailable", reason="Frigate no está disponible en este momento.")
+
+
+def probe_mqtt(host: str, port: int, *, timeout: float = DISCOVERY_TIMEOUT_SECONDS) -> IntegrationDiscovery:
+    """Comprueba solo la accesibilidad TCP del broker, sin publicar ni suscribirse."""
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return IntegrationDiscovery(status="reachable", reason="El broker MQTT acepta conexiones TCP.")
+    except (OSError, ValueError):
+        return IntegrationDiscovery(status="unavailable", reason="El broker MQTT no está disponible en este momento.")
 
 
 class Credentials(BaseModel):
@@ -117,6 +154,11 @@ def create_app(
     app.state.encryption_key = encryption_key or os.getenv("CONTROL_API_ENCRYPTION_KEY")
     app.state.frigate_config_path = Path(frigate_config_path or os.getenv("FRIGATE_CONFIG_PATH", "/config-generated/config.yml"))
     frigate_api_url = os.getenv("FRIGATE_API_URL", "http://frigate:5000").rstrip("/")
+    mqtt_host = os.getenv("MQTT_HOST", "mosquitto")
+    try:
+        mqtt_port = int(os.getenv("MQTT_PORT", "1883"))
+    except ValueError:
+        mqtt_port = 1883
 
     def restart_frigate() -> None:
         with httpx.Client(timeout=10.0) as client:
@@ -124,6 +166,19 @@ def create_app(
             response.raise_for_status()
 
     app.state.frigate_restart = frigate_restart or restart_frigate
+    app.state.discovery_probe_frigate = (
+        (lambda _url: IntegrationDiscovery(status="not_verified", reason="Comprobación de red desactivada durante las pruebas."))
+        if testing
+        else probe_frigate
+    )
+    app.state.discovery_probe_mqtt = (
+        (lambda _host, _port: IntegrationDiscovery(status="not_verified", reason="Comprobación de red desactivada durante las pruebas."))
+        if testing
+        else probe_mqtt
+    )
+    app.state.discovery_frigate_url = frigate_api_url
+    app.state.discovery_mqtt_host = mqtt_host
+    app.state.discovery_mqtt_port = mqtt_port
     app.state.testing = testing
 
     def current_user(request: Request, session: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> Any:
@@ -300,45 +355,53 @@ def create_app(
     def get_protection_status(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
         return protection_status(request.app.state.db)
 
-    @app.get("/api/protection/discovery")
-    def get_protection_discovery(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
+    @app.get("/api/protection/discovery", response_model=ProtectionDiscoveryResponse)
+    def get_protection_discovery(
+        request: Request,
+        _user: Any = Depends(current_user),
+    ) -> ProtectionDiscoveryResponse:
         db: Database = request.app.state.db
-        cameras = db.many("SELECT id, name, enabled FROM cameras ORDER BY name")
-        zones = db.many("SELECT id, camera_id, name FROM zones ORDER BY name")
-        rules = db.many("SELECT id, class_name, enabled FROM notification_rules ORDER BY id")
-        enabled_cameras = [row for row in cameras if row["enabled"]]
-        enabled_rules = [row for row in rules if row["enabled"]]
-        return {
-            "resources": {
-                "cameras": {
-                    "configured": bool(cameras),
-                    "count": len(cameras),
-                    "active_count": len(enabled_cameras),
-                    "items": [{"id": row["id"], "name": row["name"], "enabled": bool(row["enabled"])} for row in cameras],
-                },
-                "zones": {
-                    "configured": bool(zones),
-                    "count": len(zones),
-                    "items": [{"id": row["id"], "camera_id": row["camera_id"], "name": row["name"]} for row in zones],
-                },
-                "notification_rules": {
-                    "configured": bool(rules),
-                    "count": len(rules),
-                    "active_count": len(enabled_rules),
-                    "items": [{"id": row["id"], "class_name": row["class_name"], "enabled": bool(row["enabled"])} for row in rules],
-                },
+        camera_count = int(db.one("SELECT COUNT(*) AS count FROM cameras")["count"])
+        active_camera_count = int(db.one("SELECT COUNT(*) AS count FROM cameras WHERE enabled = 1")["count"])
+        zone_count = int(db.one("SELECT COUNT(*) AS count FROM zones")["count"])
+        rule_count = int(db.one("SELECT COUNT(*) AS count FROM notification_rules")["count"])
+        active_rule_count = int(db.one("SELECT COUNT(*) AS count FROM notification_rules WHERE enabled = 1")["count"])
+        cameras = db.many("SELECT id, name, enabled FROM cameras ORDER BY name LIMIT ?", (MAX_DISCOVERY_ITEMS,))
+        zones = db.many("SELECT id, camera_id, name FROM zones ORDER BY name LIMIT ?", (MAX_DISCOVERY_ITEMS,))
+        rules = db.many("SELECT id, class_name, enabled FROM notification_rules ORDER BY id LIMIT ?", (MAX_DISCOVERY_ITEMS,))
+        frigate = request.app.state.discovery_probe_frigate(request.app.state.discovery_frigate_url)
+        mqtt = request.app.state.discovery_probe_mqtt(
+            request.app.state.discovery_mqtt_host,
+            request.app.state.discovery_mqtt_port,
+        )
+        return ProtectionDiscoveryResponse(
+            resources={
+                "cameras": CameraResources(
+                    configured=camera_count > 0,
+                    count=camera_count,
+                    returned_count=len(cameras),
+                    truncated=camera_count > len(cameras),
+                    active_count=active_camera_count,
+                    items=[DiscoveredCamera(id=row["id"], name=row["name"], enabled=bool(row["enabled"])) for row in cameras],
+                ),
+                "zones": ZoneResources(
+                    configured=zone_count > 0,
+                    count=zone_count,
+                    returned_count=len(zones),
+                    truncated=zone_count > len(zones),
+                    items=[DiscoveredZone(id=row["id"], camera_id=row["camera_id"], name=row["name"]) for row in zones],
+                ),
+                "notification_rules": NotificationRuleResources(
+                    configured=rule_count > 0,
+                    count=rule_count,
+                    returned_count=len(rules),
+                    truncated=rule_count > len(rules),
+                    active_count=active_rule_count,
+                    items=[DiscoveredNotificationRule(id=row["id"], class_name=row["class_name"], enabled=bool(row["enabled"])) for row in rules],
+                ),
             },
-            "integrations": {
-                "frigate": {
-                    "status": "not_verified",
-                    "reason": "El endpoint no realiza una comprobación de red; muestra únicamente recursos gestionados localmente.",
-                },
-                "mqtt": {
-                    "status": "not_verified",
-                    "reason": "No existe una configuración de conexión persistida en control-api.",
-                },
-            },
-        }
+            integrations={"frigate": frigate, "mqtt": mqtt},
+        )
 
     @app.get("/api/protection/recommendations")
     def get_protection_recommendations(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:

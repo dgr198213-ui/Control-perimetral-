@@ -108,10 +108,12 @@ La API de control incorpora un único **perfil de protección** persistente para
 | `GET /api/protection-profile` | Consulta el perfil de protección activo. |
 | `PUT /api/protection-profile` | Actualiza el perfil tras validar valores, horarios y tipos. |
 | `GET /api/protection/status` | Devuelve un estado comprensible (`setup_required`, `attention` o `protected`) basado en cámaras, zonas, reglas y cumplimiento existentes. |
-| `GET /api/protection/discovery` | Descubre recursos persistidos —cámaras, zonas y reglas— e informa de Frigate/MQTT sin afirmar conectividad no comprobada. |
+| `GET /api/protection/discovery` | Descubre recursos persistidos —cámaras, zonas y reglas— y comprueba de forma controlada la disponibilidad de Frigate y MQTT. |
 | `GET /api/protection/recommendations` | Devuelve recomendaciones deterministas respaldadas por el estado real de la configuración. |
 
 El núcleo multisensor añade el contrato inmutable `Situation` y un `SituationEngine` puro que clasifica un `Event` como `activity_detected` o `suspicious_activity` usando la confianza que ya calcula la correlación. El motor no persiste, no envía notificaciones, no crea acciones y no convierte automáticamente una situación en incidente.
+
+El autodiscovery devuelve una respuesta tipada y limitada a un máximo de 1.000 elementos por recurso. Cada colección informa de `count`, `returned_count` y `truncated`, diferenciando el total persistido de los elementos serializados. La API nunca incluye hosts RTSP, rutas, nombres de usuario, contraseñas ni secretos cifrados. Para Frigate se consulta el endpoint interno de versión con un tiempo de espera de dos segundos; para MQTT se comprueba únicamente la apertura TCP, sin publicar ni suscribirse a temas. Los estados de integración son `reachable`, `unavailable` o `not_verified` cuando la comprobación se desactiva durante pruebas.
 
 > El repositorio no contiene todavía una implementación funcional del dashboard: `dashboard/` solo conserva un marcador. Por ello, esta entrega expone la configuración y el estado mediante la API, sin presentar una interfaz nueva ni alterar el visor 3D opcional.
 

@@ -10,7 +10,8 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from app import create_app  # noqa: E402
+import app as control_api_app  # noqa: E402
+from app import create_app, probe_frigate, probe_mqtt  # noqa: E402
 
 
 KEY = Fernet.generate_key().decode()
@@ -214,6 +215,47 @@ def test_compliance_confirmation_revocation_and_kill_switch_lifecycle(tmp_path: 
     assert [entry["action"] for entry in audit[-3:]] == ["confirm", "revoke", "clear_kill_switch"]
 
 
+def test_frigate_probe_hides_network_details_and_reports_unavailable(monkeypatch) -> None:
+    class UnavailableClient:
+        def __init__(self, *, timeout: float) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            raise httpx.ConnectError("private network detail")
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(control_api_app.httpx, "Client", UnavailableClient)
+
+    result = probe_frigate("http://frigate:5000")
+
+    assert result.status == "unavailable"
+    assert "private network" not in result.reason
+
+
+def test_mqtt_probe_reports_reachable_without_publishing(monkeypatch) -> None:
+    calls: list[tuple[str, int, float]] = []
+
+    class ReachableSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def fake_connection(address: tuple[str, int], timeout: float):
+        calls.append((address[0], address[1], timeout))
+        return ReachableSocket()
+
+    monkeypatch.setattr(control_api_app.socket, "create_connection", fake_connection)
+
+    result = probe_mqtt("mosquitto", 1883)
+
+    assert result.status == "reachable"
+    assert calls == [("mosquitto", 1883, 2.0)]
+
+
 def test_protection_profile_defaults_require_auth_and_are_persistent(tmp_path: Path) -> None:
     anonymous = make_client(tmp_path)
     assert anonymous.get("/api/protection-profile").status_code == 401
@@ -323,7 +365,14 @@ def test_protection_discovery_reports_only_persisted_resources(tmp_path: Path) -
 
     empty = client.get("/api/protection/discovery")
     assert empty.status_code == 200
-    assert empty.json()["resources"]["cameras"] == {"configured": False, "count": 0, "active_count": 0, "items": []}
+    assert empty.json()["resources"]["cameras"] == {
+        "configured": False,
+        "count": 0,
+        "returned_count": 0,
+        "truncated": False,
+        "active_count": 0,
+        "items": [],
+    }
     assert empty.json()["integrations"]["frigate"]["status"] == "not_verified"
     assert empty.json()["integrations"]["mqtt"]["status"] == "not_verified"
 
@@ -349,3 +398,36 @@ def test_protection_discovery_reports_only_persisted_resources(tmp_path: Path) -
     assert discovery["resources"]["cameras"]["active_count"] == 1
     assert discovery["resources"]["zones"]["count"] == 1
     assert discovery["resources"]["notification_rules"]["active_count"] == 1
+    assert discovery["resources"]["cameras"]["returned_count"] == 1
+    assert discovery["resources"]["cameras"]["truncated"] is False
+    assert discovery["resources"]["zones"]["returned_count"] == 1
+    assert discovery["resources"]["notification_rules"]["returned_count"] == 1
+    assert "192.0.2.30" not in client.get("/api/protection/discovery").text
+    assert "secreto-de-prueba" not in client.get("/api/protection/discovery").text
+    assert "password" not in client.get("/api/protection/discovery").text.lower()
+
+
+def test_discovery_probes_report_reachable_integrations_without_exposing_endpoints(tmp_path: Path) -> None:
+    client = authenticated_client(tmp_path)
+    app = client.app
+
+    app.state.testing = False
+    app.state.discovery_probe_frigate = lambda _url: {
+        "status": "reachable",
+        "reason": "Frigate respondió correctamente.",
+    }
+    app.state.discovery_probe_mqtt = lambda _host, _port: {
+        "status": "reachable",
+        "reason": "El broker MQTT acepta conexiones TCP.",
+    }
+
+    response = client.get("/api/protection/discovery")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["integrations"] == {
+        "frigate": {"status": "reachable", "reason": "Frigate respondió correctamente."},
+        "mqtt": {"status": "reachable", "reason": "El broker MQTT acepta conexiones TCP."},
+    }
+    assert "http://" not in response.text
+    assert "mosquitto" not in response.text

@@ -1,14 +1,15 @@
-"""Modelo de dominio validado para la configuración de protección orientada al usuario."""
+"""Modelos de dominio para la configuración y el estado de protección."""
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, StrictBool, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 
 SiteType = Literal["property", "farm", "land", "warehouse", "business"]
 ProtectionMode = Literal["quiet", "balanced", "strict"]
+IntegrationStatus = Literal["configured", "reachable", "unavailable", "not_verified"]
 
 
 class ProtectionProfile(BaseModel):
@@ -48,6 +49,85 @@ class ProtectionProfile(BaseModel):
             raise ValueError("quiet_hours_start y quiet_hours_end deben indicarse juntos")
         if self.quiet_hours_start is not None and self.quiet_hours_start == self.quiet_hours_end:
             raise ValueError("quiet_hours_start y quiet_hours_end no pueden ser iguales")
+        return self
+
+
+class DiscoveredCamera(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    enabled: bool
+
+
+class DiscoveredZone(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    camera_id: str
+    name: str
+
+
+class DiscoveredNotificationRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    class_name: str
+    enabled: bool
+
+
+class CameraResources(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    configured: bool
+    count: int = Field(ge=0)
+    returned_count: int = Field(ge=0)
+    truncated: bool
+    active_count: int = Field(ge=0)
+    items: list[DiscoveredCamera]
+
+
+class ZoneResources(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    configured: bool
+    count: int = Field(ge=0)
+    returned_count: int = Field(ge=0)
+    truncated: bool
+    items: list[DiscoveredZone]
+
+
+class NotificationRuleResources(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    configured: bool
+    count: int = Field(ge=0)
+    returned_count: int = Field(ge=0)
+    truncated: bool
+    active_count: int = Field(ge=0)
+    items: list[DiscoveredNotificationRule]
+
+
+class IntegrationDiscovery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: IntegrationStatus
+    reason: str = Field(min_length=1)
+
+
+class ProtectionDiscoveryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resources: dict[str, CameraResources | ZoneResources | NotificationRuleResources]
+    integrations: dict[str, IntegrationDiscovery]
+
+    @model_validator(mode="after")
+    def validate_resource_keys(self) -> "ProtectionDiscoveryResponse":
+        expected = {"cameras", "zones", "notification_rules"}
+        if set(self.resources) != expected:
+            raise ValueError("resources debe contener cámaras, zonas y reglas de aviso")
+        if set(self.integrations) != {"frigate", "mqtt"}:
+            raise ValueError("integrations debe contener Frigate y MQTT")
         return self
 
 
