@@ -4,6 +4,7 @@ from .evidence import Evidence
 from .event import Event
 from .incident import Incident
 from .observation import ContractValidationError, Location, Observation
+from .situation import Situation
 
 __all__ = [
     "ContractValidationError",
@@ -12,4 +13,5 @@ __all__ = [
     "Incident",
     "Location",
     "Observation",
+    "Situation",
 ]
