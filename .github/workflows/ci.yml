@@ -23,16 +23,31 @@ jobs:
         run: docker compose config
 
       - name: Install Python dependencies
-        run: python -m pip install -r control-api/requirements.txt -r multisensor/api/requirements.txt -r notifier/requirements.txt pytest
+        run: python -m pip install -r control-api/requirements.txt -r multisensor/api/requirements.txt -r notifier/requirements.txt pytest ruff pip-audit
 
       - name: Run Python tests
         run: PYTHONPATH=control-api python -m pytest control-api/tests multisensor/tests notifier/tests
+
+      - name: Lint Python
+        run: ruff check control-api multisensor notifier scripts
+
+      - name: Audit Python dependencies
+        run: pip-audit -r control-api/requirements.txt -r multisensor/api/requirements.txt -r notifier/requirements.txt
 
       - name: Build notifier image
         run: docker build --file notifier/Dockerfile --tag perimetral-notifier:ci .
 
       - name: Build control-api image
         run: docker build --file control-api/Dockerfile --tag perimetral-control-api:ci .
+
+      - name: Scan repository and configuration
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: CRITICAL,HIGH
+          exit-code: '1'
 
       - name: Scan repository for secrets
         uses: gitleaks/gitleaks-action@v2
