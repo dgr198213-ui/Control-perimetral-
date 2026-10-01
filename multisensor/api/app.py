@@ -8,6 +8,7 @@ from typing import Any
 
 from flask import Flask, jsonify, request
 
+from multisensor.health import SensorHealthService
 from multisensor.persistence import (
     EventRepository,
     IncidentRepository,
@@ -103,6 +104,11 @@ def create_app(
     @app.get("/api/multisensor/incidents/<path:incident_id>")
     def get_incident(incident_id: str):
         return resource_or_404(incident_repository.get(incident_id), "incidente")
+
+    @app.get("/api/multisensor/health")
+    def sensor_health():
+        health = SensorHealthService().evaluate(observation_repository.all())
+        return jsonify({"items": [item.to_dict() for item in health], "count": len(health)}), 200
 
     @app.get("/api/multisensor/sensors")
     def list_sensors():
