@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,7 @@ def create_app(
     incident_repository = incidents or InMemoryIncidentRepository()
     evidence_dir = Path(compliance_dir or os.getenv("COMPLIANCE_DIR", "/compliance"))
     app = Flask(__name__)
+    configured_anchors = json.loads(os.getenv("WIFI_CSI_ANCHORS", "[]"))
 
     def compliance_ready() -> bool:
         return all((evidence_dir / name).is_file() for name in REQUIRED_EVIDENCE)
@@ -85,6 +87,8 @@ def create_app(
     @app.post("/api/multisensor/wifi-csi")
     def ingest_wifi_csi():
         message = request.get_json(silent=True)
+        if isinstance(message, dict) and "measurements" in message and "anchors" not in message:
+            message = {**message, "anchors": configured_anchors}
         try:
             observation = wifi_csi_message_to_observation(message)
             observation_repository.save(observation)

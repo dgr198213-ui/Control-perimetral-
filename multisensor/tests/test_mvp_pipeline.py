@@ -46,7 +46,7 @@ class MvpPipelineTests(unittest.TestCase):
                 "timestamp": 1790623214.0,
                 "event_type": "human_motion",
                 "confidence": 0.84,
-                "features": {"motion_score": 0.72, "phase_variance": 0.61},
+                "position": {"x": 5.0, "y": 5.0},
                 "location": {"lat": 43.24, "lon": -5.34},
             },
         )

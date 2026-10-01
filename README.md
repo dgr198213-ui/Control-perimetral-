@@ -205,3 +205,37 @@ La investigación recibida distingue correctamente entre datos de infraestructur
 El módulo `multisensor.privacy` añade `PublicResourcePolicy` y `sanitize_public_resource`: redondea coordenadas públicas, limita la retención y rechaza identificadores personales o de dispositivo. Las pruebas cubren el rechazo de BSSID y otros identificadores sensibles.
 
 La propuesta de WiFi-CSI, BLE, radar mmWave, RFID, UWB y fotogrametría queda clasificada como **experimental**. Solo se implementará mediante sensores instalados y autorizados por el responsable, con datos agregados, sin identificación de terceros y con una política de retención explícita. No se presenta como capacidad operativa del MVP.
+
+## WiFi-CSI de posicionamiento mínimo
+
+WiFi-CSI se ha reducido a un sensor de posicionamiento del perímetro. El gateway recibe mediciones agregadas de tres anclas propias y produce una `Observation` con una posición local `(x, y)` y confianza. No se transportan CSI bruto, BSSID, MAC, SSID, IMEI, IMSI, reconocimiento de personas ni actividad individual.
+
+La calibración se configura una sola vez en `WIFI_CSI_ANCHORS` dentro de `.env`, usando coordenadas locales del perímetro:
+
+```env
+WIFI_CSI_ANCHORS=[{"id":"sensor_a","x":0,"y":0},{"id":"sensor_b","x":10,"y":0},{"id":"sensor_c","x":0,"y":10}]
+```
+
+El gateway puede enviar directamente una posición:
+
+```json
+{
+  "sensor_id": "wifi-csi-01",
+  "timestamp": "2026-10-01T20:00:00Z",
+  "position": {"x": 12.4, "y": 8.7},
+  "confidence": 0.82
+}
+```
+
+O puede enviar únicamente tres mediciones de distancia; la API utilizará las anclas configuradas y calculará la posición mediante trilateración 2D determinista:
+
+```json
+{
+  "sensor_id": "wifi-csi-01",
+  "timestamp": "2026-10-01T20:00:00Z",
+  "measurements": {"sensor_a": 7.07, "sensor_b": 7.07, "sensor_c": 7.07},
+  "confidence": 0.82
+}
+```
+
+El endpoint es `POST /api/multisensor/wifi-csi` y permanece protegido por el bloqueo de cumplimiento. El sistema valida que el identificador empiece por `wifi-csi-`, que existan tres anclas no colineales y que las distancias sean positivas. La posición resultante se conserva en `Observation.payload.position`; no se convierte artificialmente a latitud/longitud.

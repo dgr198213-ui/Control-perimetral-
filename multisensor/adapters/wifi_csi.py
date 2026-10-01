@@ -1,4 +1,4 @@
-"""Adaptador de eventos WiFi-CSI ya procesados al contrato canónico."""
+"""Adaptador WiFi-CSI de posicionamiento agregado del perímetro."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -6,19 +6,18 @@ from math import isfinite
 from typing import Any, Mapping
 
 from multisensor.contracts import ContractValidationError, Location, Observation
-from multisensor.privacy import PrivacyViolation, validate_wifi_csi_payload
+from multisensor.positioning import Anchor, PositioningError, triangulate
+from multisensor.privacy import PrivacyViolation
 
 
 class WifiCsiAdapterError(ValueError):
-    """Indica que un evento WiFi-CSI no tiene formato canónico válido."""
+    """Evento WiFi-CSI inválido o no permitido."""
 
 
 def _timestamp(value: Any) -> datetime:
     if isinstance(value, datetime):
         parsed = value
-    elif isinstance(value, (int, float)) and not isinstance(value, bool):
-        if not isfinite(float(value)):
-            raise WifiCsiAdapterError("timestamp WiFi-CSI no es finito")
+    elif isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(float(value)):
         parsed = datetime.fromtimestamp(float(value), tz=timezone.utc)
     elif isinstance(value, str):
         try:
@@ -32,68 +31,59 @@ def _timestamp(value: Any) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _location(message: Mapping[str, Any]) -> Location | None:
-    raw = message.get("location")
-    if raw is None:
-        if not any(key in message for key in ("latitude", "longitude", "lat", "lon")):
-            return None
-        raw = message
-    if not isinstance(raw, Mapping):
-        raise WifiCsiAdapterError("location WiFi-CSI debe ser un objeto")
-    latitude = raw.get("latitude", raw.get("lat"))
-    longitude = raw.get("longitude", raw.get("lon"))
-    if latitude is None or longitude is None:
-        raise WifiCsiAdapterError("location WiFi-CSI requiere latitude y longitude")
+def _location(message: Mapping[str, Any]) -> tuple[Location | None, dict[str, Any]]:
+    if "position" in message:
+        position = message["position"]
+        if not isinstance(position, Mapping) or not all(key in position for key in ("x", "y")):
+            raise WifiCsiAdapterError("position requiere x e y")
+        try:
+            x, y = float(position["x"]), float(position["y"])
+        except (TypeError, ValueError) as exc:
+            raise WifiCsiAdapterError("position x e y deben ser numéricos") from exc
+        if not all(isfinite(value) for value in (x, y)):
+            raise WifiCsiAdapterError("position no es finita")
+        return None, {"position": {"x": round(x, 4), "y": round(y, 4)}}
+    measurements = message.get("measurements")
+    if measurements is None:
+        raise WifiCsiAdapterError("WiFi-CSI requiere position o measurements")
+    if not isinstance(measurements, Mapping) or len(measurements) != 3:
+        raise WifiCsiAdapterError("measurements requiere exactamente tres anclas")
+    anchors_raw = message.get("anchors")
+    if not isinstance(anchors_raw, list) or len(anchors_raw) != 3:
+        raise WifiCsiAdapterError("anchors requiere tres puntos calibrados")
     try:
-        return Location(latitude=latitude, longitude=longitude)
-    except (ContractValidationError, TypeError) as exc:
-        raise WifiCsiAdapterError(f"ubicación WiFi-CSI no válida: {exc}") from exc
+        anchors = tuple(Anchor(str(item["id"]), float(item["x"]), float(item["y"])) for item in anchors_raw)
+        x, y, calculated_confidence = triangulate({str(k): float(v) for k, v in measurements.items()}, anchors)
+    except (KeyError, TypeError, ValueError, PositioningError) as exc:
+        raise WifiCsiAdapterError(f"triangulación WiFi-CSI inválida: {exc}") from exc
+    return None, {"position": {"x": x, "y": y}, "measurements": {str(k): float(v) for k, v in measurements.items()}, "triangulation_confidence": calculated_confidence}
 
 
 def wifi_csi_message_to_observation(message: Mapping[str, Any]) -> Observation:
-    """Convierte un evento procesado WiFi-CSI en ``Observation``.
-
-    El adaptador no interpreta muestras I/Q ni captura CSI bruto. Solo acepta
-    eventos con características ya extraídas y conserva el mapa ``features``
-    para que la decisión posterior sea reproducible.
-    """
     if not isinstance(message, Mapping):
         raise WifiCsiAdapterError("evento WiFi-CSI debe ser un objeto")
-    try:
-        message = validate_wifi_csi_payload(message)
-    except PrivacyViolation as exc:
-        raise WifiCsiAdapterError(str(exc)) from exc
     sensor_id = message.get("sensor_id")
-    if not isinstance(sensor_id, str) or not sensor_id.strip():
-        raise WifiCsiAdapterError("WiFi-CSI requiere sensor_id")
+    if not isinstance(sensor_id, str) or not sensor_id.startswith("wifi-csi-"):
+        raise WifiCsiAdapterError("sensor_id WiFi-CSI debe pertenecer al perímetro autorizado")
+    if any(key.lower() in {"bssid", "mac", "ssid", "imei", "imsi", "device_id", "license_plate"} for key in message):
+        raise WifiCsiAdapterError("identificador WiFi no permitido")
     timestamp = _timestamp(message.get("timestamp"))
-    event_type = message.get("event_type", "human_motion")
-    if not isinstance(event_type, str) or not event_type.strip():
-        raise WifiCsiAdapterError("event_type WiFi-CSI debe ser texto no vacío")
     raw_confidence = message.get("confidence")
-    if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
-        raise WifiCsiAdapterError("confidence WiFi-CSI debe ser numérica")
-    confidence = float(raw_confidence)
-    if not isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+    if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)) or not 0 <= float(raw_confidence) <= 1:
         raise WifiCsiAdapterError("confidence WiFi-CSI debe estar entre 0 y 1")
-    features = message.get("features", {})
-    if not isinstance(features, Mapping):
-        raise WifiCsiAdapterError("features WiFi-CSI debe ser un objeto")
-    normalized_features = dict(features)
-    event_id = message.get("id", message.get("event_id"))
-    if event_id is None or (isinstance(event_id, str) and not event_id.strip()):
-        event_id = f"{sensor_id}:{timestamp.isoformat()}"
+    _, payload = _location(message)
+    supplied_id = message.get("id", f"{sensor_id}:{timestamp.isoformat()}")
     try:
         return Observation(
-            id=f"wifi-csi:{str(event_id).strip()}",
+            id=f"wifi-csi:{str(supplied_id).strip()}",
             sensor_id=sensor_id.strip(),
             sensor_type="wifi_csi",
             timestamp=timestamp,
-            event_type=event_type.strip(),
-            confidence=confidence,
-            location=_location(message),
-            payload={"features": normalized_features, "sensor_id": sensor_id.strip()},
-            source="wifi-csi",
+            event_type="position_estimated",
+            confidence=float(raw_confidence),
+            location=None,
+            payload=payload,
+            source="wifi-csi-position",
         )
     except ContractValidationError as exc:
         raise WifiCsiAdapterError(str(exc)) from exc
