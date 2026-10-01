@@ -6,6 +6,7 @@ from math import isfinite
 from typing import Any, Mapping
 
 from multisensor.contracts import ContractValidationError, Location, Observation
+from multisensor.privacy import PrivacyViolation, validate_wifi_csi_payload
 
 
 class WifiCsiAdapterError(ValueError):
@@ -58,6 +59,10 @@ def wifi_csi_message_to_observation(message: Mapping[str, Any]) -> Observation:
     """
     if not isinstance(message, Mapping):
         raise WifiCsiAdapterError("evento WiFi-CSI debe ser un objeto")
+    try:
+        message = validate_wifi_csi_payload(message)
+    except PrivacyViolation as exc:
+        raise WifiCsiAdapterError(str(exc)) from exc
     sensor_id = message.get("sensor_id")
     if not isinstance(sensor_id, str) or not sensor_id.strip():
         raise WifiCsiAdapterError("WiFi-CSI requiere sensor_id")

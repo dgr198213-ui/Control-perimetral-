@@ -8,6 +8,7 @@ from typing import Any
 
 from flask import Flask, jsonify, request
 
+from multisensor.adapters import WifiCsiAdapterError, wifi_csi_message_to_observation
 from multisensor.health import SensorHealthService
 from multisensor.persistence import (
     EventRepository,
@@ -80,6 +81,17 @@ def create_app(
             payload, _ = _error_payload("not_found", f"{resource_type} no encontrado")
             return jsonify(payload), 404
         return jsonify(resource.to_dict())
+
+    @app.post("/api/multisensor/wifi-csi")
+    def ingest_wifi_csi():
+        message = request.get_json(silent=True)
+        try:
+            observation = wifi_csi_message_to_observation(message)
+            observation_repository.save(observation)
+        except (WifiCsiAdapterError, ValueError) as exc:
+            payload, _ = _error_payload("invalid_wifi_csi", str(exc))
+            return jsonify(payload), 400
+        return jsonify(observation.to_dict()), 201
 
     @app.get("/api/multisensor/observations")
     def list_observations():

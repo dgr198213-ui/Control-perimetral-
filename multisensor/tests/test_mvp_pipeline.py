@@ -42,11 +42,11 @@ class MvpPipelineTests(unittest.TestCase):
         wifi = message_to_observation(
             "wifi_csi",
             {
-                "sensor_id": "wifi-front",
+                "sensor_id": "wifi-csi-front",
                 "timestamp": 1790623214.0,
                 "event_type": "human_motion",
                 "confidence": 0.84,
-                "features": {"variance": 0.72, "fft_energy": 0.61},
+                "features": {"motion_score": 0.72, "phase_variance": 0.61},
                 "location": {"lat": 43.24, "lon": -5.34},
             },
         )
