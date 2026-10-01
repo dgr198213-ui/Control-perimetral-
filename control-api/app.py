@@ -22,6 +22,7 @@ from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response, 
 from pydantic import BaseModel, Field
 
 from db import Database, utc_now
+from protection import ProtectionProfile, protection_profile_from_row
 
 SESSION_COOKIE = "perimetral_session"
 SESSION_TTL_HOURS = 12
@@ -206,6 +207,124 @@ def create_app(
         request.app.state.db.audit("logout", "session", None, {"user_id": user["id"]})
         response.delete_cookie(SESSION_COOKIE)
         return {"status": "ok"}
+
+    def current_protection_profile(db: Database) -> ProtectionProfile:
+        row = db.one("SELECT * FROM protection_profile WHERE id = 1")
+        if row is None:
+            raise HTTPException(status_code=500, detail="El perfil de protección no está disponible")
+        return protection_profile_from_row(row)
+
+    def protection_status(db: Database) -> dict[str, Any]:
+        profile = current_protection_profile(db)
+        cameras = db.many("SELECT id FROM cameras WHERE enabled = 1")
+        zones = db.many("SELECT id FROM zones")
+        notification_rules = db.many("SELECT id FROM notification_rules WHERE enabled = 1")
+        compliance = db.one("SELECT * FROM compliance WHERE id = 1")
+        recording_allowed = bool(
+            compliance
+            and compliance["signage_confirmed"]
+            and compliance["mandate_confirmed"]
+            and not compliance["kill_switch"]
+        )
+
+        setup_required: list[str] = []
+        if not cameras:
+            setup_required.append("Añade y activa al menos una cámara")
+        if compliance is None or not compliance["signage_confirmed"] or not compliance["mandate_confirmed"]:
+            setup_required.append("Confirma los requisitos de cumplimiento antes de activar la protección")
+        elif compliance["kill_switch"]:
+            setup_required.append("El interruptor de seguridad está activo")
+
+        attention_required = bool(cameras) and (not zones or (profile.notify_on_suspicious and not notification_rules))
+        if setup_required:
+            status_value = "setup_required"
+            summary = "Completa la configuración necesaria para activar la protección."
+        elif attention_required:
+            status_value = "attention"
+            summary = "La protección está activa, pero conviene completar su configuración."
+        else:
+            status_value = "protected"
+            summary = "La protección está configurada y las fuentes activas pueden vigilar el sitio."
+
+        return {
+            "status": status_value,
+            "summary": summary,
+            "profile": {
+                "site_type": profile.site_type,
+                "protection_mode": profile.protection_mode,
+            },
+            "capabilities": {
+                "cameras": bool(cameras),
+                "motion_detection": bool(cameras),
+                "multisensor_correlation": False,
+                "notifications": bool(notification_rules),
+            },
+            "setup_required": setup_required,
+            "recording_allowed": recording_allowed,
+        }
+
+    @app.get("/api/protection-profile", response_model=ProtectionProfile)
+    def get_protection_profile(request: Request, _user: Any = Depends(current_user)) -> ProtectionProfile:
+        return current_protection_profile(request.app.state.db)
+
+    @app.put("/api/protection-profile", response_model=ProtectionProfile)
+    def update_protection_profile(
+        body: ProtectionProfile,
+        request: Request,
+        user: Any = Depends(current_user),
+    ) -> ProtectionProfile:
+        db: Database = request.app.state.db
+        values = body.model_dump()
+        db.execute(
+            "UPDATE protection_profile SET site_type=?, protection_mode=?, detect_people=?, "
+            "detect_vehicles=?, detect_animals=?, night_protection=?, notify_on_suspicious=?, "
+            "notify_on_incident=?, quiet_hours_start=?, quiet_hours_end=?, updated_at=? WHERE id=1",
+            (
+                values["site_type"],
+                values["protection_mode"],
+                int(values["detect_people"]),
+                int(values["detect_vehicles"]),
+                int(values["detect_animals"]),
+                int(values["night_protection"]),
+                int(values["notify_on_suspicious"]),
+                int(values["notify_on_incident"]),
+                values["quiet_hours_start"],
+                values["quiet_hours_end"],
+                utc_now(),
+            ),
+        )
+        db.audit("update", "protection_profile", "1", {"user_id": user["id"]})
+        return current_protection_profile(db)
+
+    @app.get("/api/protection/status")
+    def get_protection_status(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
+        return protection_status(request.app.state.db)
+
+    @app.get("/api/protection/recommendations")
+    def get_protection_recommendations(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
+        db: Database = request.app.state.db
+        profile = current_protection_profile(db)
+        cameras = db.many("SELECT id FROM cameras")
+        enabled_cameras = db.many("SELECT id FROM cameras WHERE enabled = 1")
+        zones = db.many("SELECT id FROM zones")
+        notification_rules = db.many("SELECT id FROM notification_rules WHERE enabled = 1")
+        compliance = db.one("SELECT * FROM compliance WHERE id = 1")
+        recommendations: list[dict[str, str]] = []
+        if not cameras:
+            recommendations.append({"code": "add_camera", "message": "Añade al menos una cámara para iniciar la protección."})
+        elif not enabled_cameras:
+            recommendations.append({"code": "enable_camera", "message": "Activa al menos una cámara configurada."})
+        if enabled_cameras and not zones:
+            recommendations.append({"code": "add_zone", "message": "Define al menos una zona de protección para las cámaras activas."})
+        if not profile.night_protection:
+            recommendations.append({"code": "enable_night_protection", "message": "La protección nocturna está desactivada."})
+        if enabled_cameras and profile.notify_on_suspicious and not notification_rules:
+            recommendations.append({"code": "add_notification_rule", "message": "Configura una regla de aviso para la actividad sospechosa."})
+        if compliance is None or not compliance["signage_confirmed"] or not compliance["mandate_confirmed"]:
+            recommendations.append({"code": "confirm_compliance", "message": "Confirma los requisitos de cumplimiento antes de activar la protección."})
+        elif compliance["kill_switch"]:
+            recommendations.append({"code": "clear_kill_switch", "message": "El interruptor de seguridad está activo; revísalo antes de continuar."})
+        return {"items": recommendations}
 
     @app.get("/api/settings")
     def get_settings(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
