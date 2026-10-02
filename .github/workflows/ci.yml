@@ -34,6 +34,10 @@ jobs:
       - name: Audit Python dependencies
         run: pip-audit -r control-api/requirements.txt -r multisensor/api/requirements.txt -r notifier/requirements.txt
 
+      - name: Build dashboard
+        working-directory: dashboard
+        run: corepack pnpm install --frozen-lockfile && corepack pnpm run build
+
       - name: Build notifier image
         run: docker build --file notifier/Dockerfile --tag perimetral-notifier:ci .
 

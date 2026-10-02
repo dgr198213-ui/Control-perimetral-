@@ -165,7 +165,7 @@ services:
       - "${CADDY_BIND_ADDRESS:-127.0.0.1}:8443:8443"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./dashboard:/srv/dashboard:ro
+      - ./dashboard/dist:/srv/dashboard:ro
       - ./storage/caddy-data:/data
       - ./storage/caddy-config:/config
     depends_on:
