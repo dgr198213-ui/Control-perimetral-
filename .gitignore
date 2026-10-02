@@ -1,6 +1,8 @@
 .env
 compliance/carteleria-verificada
 compliance/encargo-tratamiento-firmado
+compliance/carteleria-verificada.json
+compliance/encargo-tratamiento-firmado.json
 storage/*
 !storage/.gitkeep
 !storage/mosquitto/.gitkeep

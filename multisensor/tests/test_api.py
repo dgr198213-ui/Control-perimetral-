@@ -79,6 +79,7 @@ class ApiIntegrationTests(unittest.TestCase):
             "/api/multisensor/incidents",
             "/api/multisensor/incidents/incident:1",
             "/api/multisensor/sensors",
+            "/api/multisensor/health",
         ):
             response = client.get(path)
             self.assertEqual(response.status_code, 403, path)
@@ -101,6 +102,14 @@ class ApiIntegrationTests(unittest.TestCase):
         self.assertEqual(observation_response.status_code, 200)
         self.assertEqual(event_response.json["observation_ids"], ["obs:1"])
         self.assertEqual(incident_response.json["evidence_ids"], ["evidence:1"])
+
+    def test_health_endpoint_reports_sensor_freshness(self) -> None:
+        response = self.client.get("/api/multisensor/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["count"], 1)
+        self.assertEqual(response.json["items"][0]["sensor_id"], "pir-front")
+        self.assertEqual(response.json["items"][0]["status"], "stale")
 
     def test_sensors_endpoint_is_derived_from_observations(self) -> None:
         response = self.client.get("/api/multisensor/sensors")

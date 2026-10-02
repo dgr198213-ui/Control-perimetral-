@@ -15,7 +15,11 @@ from typing import Any
 import paho.mqtt.client as mqtt
 import requests
 
+from multisensor.actions import ActionQueue, ActionRequest
+from multisensor.contracts import Situation
 from multisensor.adapters import FrigateAdapterError, FrigateEventProcessor
+from multisensor.persistence import SQLiteObservationRepository
+from multisensor.policy import PolicyEngine
 
 LOG = logging.getLogger("perimetral-notifier")
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
@@ -33,6 +37,9 @@ NOTIFY_ZONES = {
 NOTIFIABLE_CLASSES = {"person", "car", "motorcycle", "bicycle"}
 SEEN_EVENTS: set[str] = set()
 FRIGATE_EVENTS = FrigateEventProcessor()
+OBSERVATIONS = SQLiteObservationRepository(os.getenv("MULTISENSOR_DB", "data/multisensor.sqlite3"))
+ACTION_QUEUE = ActionQueue(os.getenv("ACTIONS_DB", "data/actions.sqlite3"))
+POLICY = PolicyEngine()
 
 
 def compliance_ready() -> bool:
@@ -50,6 +57,7 @@ def send_telegram(text: str) -> None:
         response.raise_for_status()
     except requests.RequestException:
         LOG.exception("Error enviando la alerta textual a Telegram")
+        raise
 
 
 def on_connect(client: mqtt.Client, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any = None) -> None:
@@ -94,24 +102,51 @@ def on_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> N
     if not compliance_ready():
         LOG.warning("Evento %s descartado: falta evidencia de cumplimiento", event_id or "sin-id")
         return
-    if not telegram_configured():
-        LOG.error("Telegram no configurado; alerta no enviada")
-        return
-
     if event_id:
         SEEN_EVENTS.add(event_id)
         if len(SEEN_EVENTS) > 10000:
             SEEN_EVENTS.clear()
 
+    try:
+        OBSERVATIONS.save(observation)
+    except ValueError:
+        LOG.info("Observación ya persistida: %s", observation.id)
+    situation = Situation(
+        id=f"situation:{event_id or observation.id}",
+        situation_type="suspicious_activity",
+        started_at=observation.timestamp,
+        updated_at=observation.timestamp,
+        confidence=observation.confidence,
+        observation_ids=(observation.id,),
+        explanation="Actividad detectada en una clase y zona notificables.",
+        payload={"label": label, "camera": camera, "zones": sorted(zones)},
+    )
+    decision = POLICY.evaluate(situation, compliance_allowed=True)
+    if not decision.allowed:
+        LOG.info("Aviso suprimido para %s: %s", situation.id, decision.reason)
+        return
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S %z")
     zone_text = ", ".join(sorted(zones & NOTIFY_ZONES))
-    send_telegram(f"Detección: {label}\nCámara: {camera}\nZona: {zone_text}\nHora: {timestamp}")
+    request = ActionRequest(
+        id=f"action:{situation.id}",
+        action_type=decision.action_type or "notify_suspicious",
+        subject_id=situation.id,
+        payload={"text": f"Detección: {label}\\nCámara: {camera}\\nZona: {zone_text}\\nHora: {timestamp}"},
+        created_at=observation.timestamp,
+    )
+    ACTION_QUEUE.enqueue(request)
+    if telegram_configured():
+        ACTION_QUEUE.process(lambda item: send_telegram(str(item.payload["text"])))
+    else:
+        LOG.warning("Telegram no configurado; la acción queda pendiente en la cola")
 
 
 def main() -> None:
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
     if not compliance_ready():
         LOG.warning("Modo bloqueado: no se enviarán alertas hasta acreditar cartelería y encargo firmado")
+    if telegram_configured():
+        ACTION_QUEUE.process(lambda item: send_telegram(str(item.payload["text"])))
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
     client.on_message = on_message

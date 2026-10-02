@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPLIANCE_DIR="$ROOT_DIR/compliance"
-CONFIG="$ROOT_DIR/frigate/config.yml"
+CONFIG="$ROOT_DIR/data/frigate-config/config.yml"
 
 for evidence in carteleria-verificada encargo-tratamiento-firmado; do
   if [[ ! -f "$COMPLIANCE_DIR/$evidence" ]]; then

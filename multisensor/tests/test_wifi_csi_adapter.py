@@ -1,4 +1,3 @@
-"""Pruebas del adaptador WiFi-CSI."""
 from __future__ import annotations
 
 from datetime import timezone
@@ -7,56 +6,53 @@ import unittest
 from multisensor.adapters import WifiCsiAdapterError, message_to_observation, wifi_csi_message_to_observation
 
 
-class WifiCsiAdapterTests(unittest.TestCase):
-    def test_converts_processed_event_and_preserves_features(self) -> None:
-        observation = wifi_csi_message_to_observation(
-            {
-                "sensor_id": "wifi-node-01",
-                "timestamp": "2026-09-28T19:20:16+02:00",
-                "event_type": "human_motion",
-                "confidence": 0.84,
-                "features": {"variance": 0.72, "fft_energy": 0.61, "threshold": 0.48},
-                "location": {"lat": 43.24, "lon": -5.34},
-            }
-        )
+ANCHORS = [
+    {"id": "sensor_a", "x": 0, "y": 0},
+    {"id": "sensor_b", "x": 10, "y": 0},
+    {"id": "sensor_c", "x": 0, "y": 10},
+]
 
-        self.assertEqual(observation.id, "wifi-csi:wifi-node-01:2026-09-28T17:20:16+00:00")
+
+class WifiCsiAdapterTests(unittest.TestCase):
+    def test_accepts_minimal_gateway_position(self) -> None:
+        observation = wifi_csi_message_to_observation({
+            "sensor_id": "wifi-csi-01",
+            "timestamp": "2026-09-28T19:20:16+02:00",
+            "position": {"x": 12.4, "y": 8.7},
+            "confidence": 0.84,
+        })
         self.assertEqual(observation.sensor_type, "wifi_csi")
-        self.assertEqual(observation.event_type, "human_motion")
-        self.assertEqual(observation.confidence, 0.84)
+        self.assertEqual(observation.event_type, "position_estimated")
         self.assertEqual(observation.timestamp.tzinfo, timezone.utc)
-        self.assertEqual(observation.payload["features"]["fft_energy"], 0.61)
-        self.assertEqual(observation.location.to_dict(), {"latitude": 43.24, "longitude": -5.34})
+        self.assertEqual(observation.payload["position"], {"x": 12.4, "y": 8.7})
+
+    def test_triangulates_three_anchors(self) -> None:
+        observation = wifi_csi_message_to_observation({
+            "sensor_id": "wifi-csi-01",
+            "timestamp": "2026-10-01T20:00:00Z",
+            "measurements": {"sensor_a": 7.0710678, "sensor_b": 7.0710678, "sensor_c": 7.0710678},
+            "anchors": ANCHORS,
+            "confidence": 0.82,
+        })
+        self.assertEqual(observation.payload["position"], {"x": 5.0, "y": 5.0})
+        self.assertGreaterEqual(observation.payload["triangulation_confidence"], 0.99)
 
     def test_dispatches_wifi_alias_into_common_observation_flow(self) -> None:
         observation = message_to_observation(
             "wifi-csi",
-            {
-                "id": "wifi-event-1",
-                "sensor_id": "wifi-node-01",
-                "timestamp": "2026-09-28T19:20:16Z",
-                "confidence": 0.84,
-                "features": {"variance": 0.72},
-            },
+            {"id": "wifi-event-1", "sensor_id": "wifi-csi-01", "timestamp": "2026-09-28T19:20:16Z", "confidence": 0.84, "position": {"x": 1.2, "y": 2.3}},
         )
         self.assertEqual(observation.id, "wifi-csi:wifi-event-1")
-        self.assertEqual(observation.source, "wifi-csi")
+        self.assertEqual(observation.source, "wifi-csi-position")
 
-    def test_rejects_raw_or_incomplete_events(self) -> None:
-        base = {
-            "sensor_id": "wifi-node-01",
-            "timestamp": "2026-09-28T19:20:16Z",
-            "confidence": 0.84,
-            "features": {"variance": 0.72},
-        }
-        with self.assertRaisesRegex(WifiCsiAdapterError, "sensor_id"):
-            wifi_csi_message_to_observation({**base, "sensor_id": ""})
-        with self.assertRaisesRegex(WifiCsiAdapterError, "timestamp"):
-            wifi_csi_message_to_observation({key: value for key, value in base.items() if key != "timestamp"})
-        with self.assertRaisesRegex(WifiCsiAdapterError, "confidence.*entre"):
-            wifi_csi_message_to_observation({**base, "confidence": 1.4})
-        with self.assertRaisesRegex(WifiCsiAdapterError, "features"):
-            wifi_csi_message_to_observation({**base, "features": [0.1, 0.2]})
+    def test_rejects_identifiers_and_invalid_positioning(self) -> None:
+        base = {"sensor_id": "wifi-csi-01", "timestamp": "2026-09-28T19:20:16Z", "confidence": 0.84, "position": {"x": 1, "y": 2}}
+        with self.assertRaisesRegex(WifiCsiAdapterError, "identificador"):
+            wifi_csi_message_to_observation({**base, "bssid": "AA:BB:CC:DD:EE:FF"})
+        with self.assertRaisesRegex(WifiCsiAdapterError, "perímetro"):
+            wifi_csi_message_to_observation({**base, "sensor_id": "wifi-node-01"})
+        with self.assertRaisesRegex(WifiCsiAdapterError, "position"):
+            wifi_csi_message_to_observation({**base, "position": {"x": "x", "y": 2}})
 
 
 if __name__ == "__main__":

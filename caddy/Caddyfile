@@ -1,14 +1,20 @@
-:8080 {
-    bind 0.0.0.0
-    root * /srv/dashboard
-    encode gzip
+http://{$CADDY_HOSTNAME:localhost}:8080 {
+	bind 0.0.0.0
+	redir https://{$CADDY_HOSTNAME:localhost}:8443{uri} 308
+}
 
-    handle /api/health {
-        reverse_proxy control-api:8000
-    }
+https://{$CADDY_HOSTNAME:localhost}:8443 {
+	bind 0.0.0.0
+	tls internal
+	root * /srv/dashboard
+	encode gzip
 
-    handle {
-        try_files {path} /index.html
-        file_server
-    }
+	handle /api/* {
+		reverse_proxy control-api:8000
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
 }
