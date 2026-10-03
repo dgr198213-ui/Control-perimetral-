@@ -37,7 +37,7 @@ observation = normalize_observation({
 
 ## Correlación temporal y espacial
 
-`TemporalSpatialCorrelator` recibe `Observation` de Frigate, PIR y WiFi-CSI y devuelve un `Correlation` basado en `Event`. La correlación requiere por defecto al menos dos tipos de sensor distintos; una cámara sola no genera una correlación. La ventana temporal predeterminada es de 5 segundos y la distancia máxima predeterminada es de 75 metros.
+`TemporalSpatialCorrelator` recibe `Observation` de Frigate y PIR y devuelve un `Correlation` basado en `Event`. Los adaptadores experimentales fuera de alcance no se conectan al pipeline comercial. La correlación requiere por defecto al menos dos tipos de sensor distintos; una cámara sola no genera una correlación. La ventana temporal predeterminada es de 5 segundos y la distancia máxima predeterminada es de 75 metros.
 
 La puntuación es explícita y auditable:
 
@@ -54,21 +54,9 @@ if correlation:
     print(correlation.event.to_dict())
 ```
 
-## WiFi-CSI
+## Integraciones fuera de alcance
 
-`wifi_csi_message_to_observation` acepta eventos ya procesados, no muestras CSI brutas. Requiere `sensor_id`, `timestamp`, `confidence` y `features`, conserva esas características en el payload y alimenta el mismo `Observation` que Frigate y PIR.
-
-```python
-from multisensor.adapters import message_to_observation
-
-observation = message_to_observation("wifi_csi", {
-    "sensor_id": "wifi-node-01",
-    "timestamp": "2026-09-28T19:20:16Z",
-    "event_type": "human_motion",
-    "confidence": 0.84,
-    "features": {"variance": 0.72, "fft_energy": 0.61, "threshold": 0.48},
-})
-```
+El producto activo no expone una ruta WiFi-CSI, no arranca un gateway WiFi-CSI y no acepta identificadores de red. El adaptador legado se conserva únicamente para compatibilidad de contratos históricos y no debe conectarse a instalaciones comerciales ni incluirse en despliegues nuevos.
 
 ## Fusión, evidencia e incidentes
 
@@ -92,4 +80,4 @@ Desde la raíz del repositorio se ejecuta la suite de esta fase con:
 python3 -m unittest discover -s multisensor/tests -p 'test_*.py' -v
 ```
 
-Los adaptadores de Frigate, PIR y WiFi-CSI, el correlador, la fusión, el motor de incidentes y los repositorios no incorporan código externo. WiFi-CSI conserva features ya procesadas, sin capturar CSI bruto. La fusión e incidentes no modifican los flujos operativos ni emiten alertas. Cuando se incorporen adaptadores o algoritmos de terceros, se documentarán su procedencia, licencia y avisos aplicables antes de reutilizar código.
+Los adaptadores activos de Frigate y PIR, el correlador, la fusión, el motor de incidentes y los repositorios no incorporan código externo. La fusión e incidentes no modifican los flujos operativos ni emiten alertas por sí mismos. Las capacidades experimentales fuera de alcance no se conectan al stack comercial. Cuando se incorporen adaptadores o algoritmos de terceros, se documentarán su procedencia, licencia y avisos aplicables antes de reutilizar código.

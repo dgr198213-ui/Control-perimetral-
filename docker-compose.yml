@@ -111,7 +111,6 @@ services:
     environment:
       COMPLIANCE_DIR: /compliance
       MULTISENSOR_DB: /data/multisensor.sqlite3
-      WIFI_CSI_ANCHORS: ${WIFI_CSI_ANCHORS:-[]}
     volumes:
       - ./compliance:/compliance:ro
       - ./data/multisensor:/data
@@ -122,35 +121,6 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-
-  wifi-csi-gateway:
-    container_name: perimetral-wifi-csi-gateway
-    build:
-      context: .
-      dockerfile: scripts/Dockerfile
-    restart: unless-stopped
-    cap_drop:
-      - ALL
-    read_only: true
-    env_file:
-      - .env
-    environment:
-      WIFI_CSI_INTERVAL_SECONDS: ${WIFI_CSI_INTERVAL_SECONDS:-3}
-      WIFI_CSI_TIMEOUT_SECONDS: ${WIFI_CSI_TIMEOUT_SECONDS:-2}
-      WIFI_CSI_SOURCE_URL: ${WIFI_CSI_SOURCE_URL:-}
-      WIFI_CSI_TARGET_URL: http://multisensor-api:8000/api/multisensor/wifi-csi
-      WIFI_CSI_SENSOR_ID: ${WIFI_CSI_SENSOR_ID:-wifi-csi-01}
-      WIFI_CSI_STATUS_FILE: /data/wifi-csi-gateway.json
-    volumes:
-      - ./data/wifi-csi:/data
-    depends_on:
-      multisensor-api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import json; assert json.load(open('/data/wifi-csi-gateway.json'))['status'] in ('healthy', 'degraded')"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
 
   caddy:
     container_name: perimetral-caddy

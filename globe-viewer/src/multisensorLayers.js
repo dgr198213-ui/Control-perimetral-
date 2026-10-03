@@ -3,7 +3,6 @@ import * as Cesium from "cesium";
 const OBSERVATION_COLORS = {
   camera: Cesium.Color.ORANGE,
   pir: Cesium.Color.YELLOW,
-  wifi_csi: Cesium.Color.MAGENTA,
 };
 
 function locationOf(item) {

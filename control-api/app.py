@@ -201,11 +201,18 @@ def create_app(
         )
         if row is None:
             raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+        request.state.tenant_id = int(row["tenant_id"])
         return row
+
+    def tenant_id(request: Request) -> int:
+        value = getattr(request.state, "tenant_id", None)
+        if value is None:
+            raise HTTPException(status_code=401, detail="Tenant no resuelto")
+        return int(value)
 
     def require_compliance(request: Request) -> sqlite3.Row:
         db: Database = request.app.state.db
-        row = db.one("SELECT * FROM compliance WHERE id = 1")
+        row = db.one("SELECT * FROM compliance WHERE tenant_id = ?", (tenant_id(request),))
         if row is None or not (row["signage_confirmed"] and row["mandate_confirmed"]) or row["kill_switch"]:
             raise HTTPException(status_code=423, detail="Operación bloqueada por cumplimiento")
         return row
@@ -232,7 +239,7 @@ def create_app(
         if db.one("SELECT id FROM users LIMIT 1") is not None:
             raise HTTPException(status_code=409, detail="El usuario inicial ya está configurado")
         user_id = db.execute(
-            "INSERT INTO users(username, password_hash, created_at) VALUES (?, ?, ?)",
+            "INSERT INTO users(tenant_id, username, password_hash, created_at) VALUES (1, ?, ?, ?)",
             (credentials.username.strip(), PASSWORDS.hash(credentials.password), utc_now()),
         ).lastrowid
         db.audit("create", "user", str(user_id), {"username": credentials.username.strip()})
@@ -280,22 +287,22 @@ def create_app(
         user = current_user(request, session)
         if session:
             request.app.state.db.execute("DELETE FROM sessions WHERE token_hash = ?", (hash_token(session),))
-        request.app.state.db.audit("logout", "session", None, {"user_id": user["id"]})
+        request.app.state.db.audit("logout", "session", None, {"user_id": user["id"], "tenant_id": tenant_id(request)})
         response.delete_cookie(SESSION_COOKIE)
         return {"status": "ok"}
 
-    def current_protection_profile(db: Database) -> ProtectionProfile:
-        row = db.one("SELECT * FROM protection_profile WHERE id = 1")
+    def current_protection_profile(db: Database, current_tenant_id: int) -> ProtectionProfile:
+        row = db.one("SELECT * FROM protection_profile WHERE tenant_id = ?", (current_tenant_id,))
         if row is None:
             raise HTTPException(status_code=500, detail="El perfil de protección no está disponible")
         return protection_profile_from_row(row)
 
-    def protection_status(db: Database) -> dict[str, Any]:
-        profile = current_protection_profile(db)
-        cameras = db.many("SELECT id FROM cameras WHERE enabled = 1")
-        zones = db.many("SELECT id FROM zones")
-        notification_rules = db.many("SELECT id FROM notification_rules WHERE enabled = 1")
-        compliance = db.one("SELECT * FROM compliance WHERE id = 1")
+    def protection_status(db: Database, current_tenant_id: int) -> dict[str, Any]:
+        profile = current_protection_profile(db, current_tenant_id)
+        cameras = db.many("SELECT id FROM cameras WHERE tenant_id = ? AND enabled = 1", (current_tenant_id,))
+        zones = db.many("SELECT id FROM zones WHERE tenant_id = ?", (current_tenant_id,))
+        notification_rules = db.many("SELECT id FROM notification_rules WHERE tenant_id = ? AND enabled = 1", (current_tenant_id,))
+        compliance = db.one("SELECT * FROM compliance WHERE tenant_id = ?", (current_tenant_id,))
         recording_allowed = bool(
             compliance
             and compliance["signage_confirmed"]
@@ -341,7 +348,7 @@ def create_app(
 
     @app.get("/api/protection-profile", response_model=ProtectionProfile)
     def get_protection_profile(request: Request, _user: Any = Depends(current_user)) -> ProtectionProfile:
-        return current_protection_profile(request.app.state.db)
+        return current_protection_profile(request.app.state.db, tenant_id(request))
 
     @app.put("/api/protection-profile", response_model=ProtectionProfile)
     def update_protection_profile(
@@ -354,7 +361,7 @@ def create_app(
         db.execute(
             "UPDATE protection_profile SET site_type=?, protection_mode=?, detect_people=?, "
             "detect_vehicles=?, detect_animals=?, night_protection=?, notify_on_suspicious=?, "
-            "notify_on_incident=?, quiet_hours_start=?, quiet_hours_end=?, updated_at=? WHERE id=1",
+            "notify_on_incident=?, quiet_hours_start=?, quiet_hours_end=?, updated_at=? WHERE tenant_id=?",
             (
                 values["site_type"],
                 values["protection_mode"],
@@ -367,14 +374,15 @@ def create_app(
                 values["quiet_hours_start"],
                 values["quiet_hours_end"],
                 utc_now(),
+                tenant_id(request),
             ),
         )
-        db.audit("update", "protection_profile", "1", {"user_id": user["id"]})
-        return current_protection_profile(db)
+        db.audit("update", "protection_profile", str(tenant_id(request)), {"user_id": user["id"], "tenant_id": tenant_id(request)})
+        return current_protection_profile(db, tenant_id(request))
 
     @app.get("/api/protection/status")
     def get_protection_status(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
-        return protection_status(request.app.state.db)
+        return protection_status(request.app.state.db, tenant_id(request))
 
     @app.get("/api/protection/discovery", response_model=ProtectionDiscoveryResponse)
     def get_protection_discovery(
@@ -382,14 +390,14 @@ def create_app(
         _user: Any = Depends(current_user),
     ) -> ProtectionDiscoveryResponse:
         db: Database = request.app.state.db
-        camera_count = int(db.one("SELECT COUNT(*) AS count FROM cameras")["count"])
-        active_camera_count = int(db.one("SELECT COUNT(*) AS count FROM cameras WHERE enabled = 1")["count"])
-        zone_count = int(db.one("SELECT COUNT(*) AS count FROM zones")["count"])
-        rule_count = int(db.one("SELECT COUNT(*) AS count FROM notification_rules")["count"])
-        active_rule_count = int(db.one("SELECT COUNT(*) AS count FROM notification_rules WHERE enabled = 1")["count"])
-        cameras = db.many("SELECT id, name, enabled FROM cameras ORDER BY name LIMIT ?", (MAX_DISCOVERY_ITEMS,))
-        zones = db.many("SELECT id, camera_id, name FROM zones ORDER BY name LIMIT ?", (MAX_DISCOVERY_ITEMS,))
-        rules = db.many("SELECT id, class_name, enabled FROM notification_rules ORDER BY id LIMIT ?", (MAX_DISCOVERY_ITEMS,))
+        camera_count = int(db.one("SELECT COUNT(*) AS count FROM cameras WHERE tenant_id = ?", (tenant_id(request),))["count"])
+        active_camera_count = int(db.one("SELECT COUNT(*) AS count FROM cameras WHERE tenant_id = ? AND enabled = 1", (tenant_id(request),))["count"])
+        zone_count = int(db.one("SELECT COUNT(*) AS count FROM zones WHERE tenant_id = ?", (tenant_id(request),))["count"])
+        rule_count = int(db.one("SELECT COUNT(*) AS count FROM notification_rules WHERE tenant_id = ?", (tenant_id(request),))["count"])
+        active_rule_count = int(db.one("SELECT COUNT(*) AS count FROM notification_rules WHERE tenant_id = ? AND enabled = 1", (tenant_id(request),))["count"])
+        cameras = db.many("SELECT id, name, enabled FROM cameras WHERE tenant_id = ? ORDER BY name LIMIT ?", (tenant_id(request), MAX_DISCOVERY_ITEMS))
+        zones = db.many("SELECT id, camera_id, name FROM zones WHERE tenant_id = ? ORDER BY name LIMIT ?", (tenant_id(request), MAX_DISCOVERY_ITEMS))
+        rules = db.many("SELECT id, class_name, enabled FROM notification_rules WHERE tenant_id = ? ORDER BY id LIMIT ?", (tenant_id(request), MAX_DISCOVERY_ITEMS))
         frigate = request.app.state.discovery_probe_frigate(request.app.state.discovery_frigate_url)
         mqtt = request.app.state.discovery_probe_mqtt(
             request.app.state.discovery_mqtt_host,
@@ -427,12 +435,12 @@ def create_app(
     @app.get("/api/protection/recommendations")
     def get_protection_recommendations(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
         db: Database = request.app.state.db
-        profile = current_protection_profile(db)
-        cameras = db.many("SELECT id FROM cameras")
-        enabled_cameras = db.many("SELECT id FROM cameras WHERE enabled = 1")
-        zones = db.many("SELECT id FROM zones")
-        notification_rules = db.many("SELECT id FROM notification_rules WHERE enabled = 1")
-        compliance = db.one("SELECT * FROM compliance WHERE id = 1")
+        profile = current_protection_profile(db, tenant_id(request))
+        cameras = db.many("SELECT id FROM cameras WHERE tenant_id = ?", (tenant_id(request),))
+        enabled_cameras = db.many("SELECT id FROM cameras WHERE tenant_id = ? AND enabled = 1", (tenant_id(request),))
+        zones = db.many("SELECT id FROM zones WHERE tenant_id = ?", (tenant_id(request),))
+        notification_rules = db.many("SELECT id FROM notification_rules WHERE tenant_id = ? AND enabled = 1", (tenant_id(request),))
+        compliance = db.one("SELECT * FROM compliance WHERE tenant_id = ?", (tenant_id(request),))
         recommendations: list[dict[str, str]] = []
         if not cameras:
             recommendations.append({"code": "add_camera", "message": "Añade al menos una cámara para iniciar la protección."})
@@ -452,64 +460,65 @@ def create_app(
 
     @app.get("/api/settings")
     def get_settings(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
-        rows = request.app.state.db.many("SELECT key, value, updated_at FROM settings ORDER BY key")
+        rows = request.app.state.db.many("SELECT key, value, updated_at FROM settings WHERE tenant_id = ? ORDER BY key", (tenant_id(request),))
         return {"items": [row_dict(row) for row in rows]}
 
     @app.put("/api/settings/{key}")
     def set_setting(key: str, body: SettingUpdate, request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
         db: Database = request.app.state.db
         db.execute(
-            "INSERT INTO settings(key, value, updated_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-            (key, body.value, utc_now()),
+            "INSERT INTO settings(tenant_id, key, value, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(tenant_id, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (tenant_id(request), key, body.value, utc_now()),
         )
-        db.audit("upsert", "setting", key, {"user_id": user["id"]})
+        db.audit("upsert", "setting", key, {"user_id": user["id"], "tenant_id": tenant_id(request)})
         return {"key": key, "value": body.value}
 
     @app.get("/api/compliance", response_model=ComplianceView)
     def get_compliance(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
-        row = request.app.state.db.one("SELECT * FROM compliance WHERE id = 1")
+        row = request.app.state.db.one("SELECT * FROM compliance WHERE tenant_id = ?", (tenant_id(request),))
         return {**row_dict(row), "recording_allowed": bool(row["signage_confirmed"] and row["mandate_confirmed"] and not row["kill_switch"])}
 
     @app.post("/api/compliance/confirm", response_model=ComplianceView)
     def confirm_compliance(body: ComplianceReason, request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
         db: Database = request.app.state.db
-        row = db.one("SELECT * FROM compliance WHERE id = 1")
+        row = db.one("SELECT * FROM compliance WHERE tenant_id = ?", (tenant_id(request),))
         if row["kill_switch"]:
             raise HTTPException(status_code=423, detail="El kill-switch está activo; libéralo explícitamente antes de confirmar")
         db.execute(
-            "UPDATE compliance SET signage_confirmed = 1, mandate_confirmed = 1, updated_at = ? WHERE id = 1",
-            (utc_now(),),
+            "UPDATE compliance SET signage_confirmed = 1, mandate_confirmed = 1, updated_at = ? WHERE tenant_id = ?",
+            (utc_now(), tenant_id(request)),
         )
-        db.audit("confirm", "compliance", "1", {"user_id": user["id"], "reason": body.reason})
-        updated = db.one("SELECT * FROM compliance WHERE id = 1")
-        return {**row_dict(updated), "recording_allowed": True}
+        db.audit("confirm", "compliance", "1", {"user_id": user["id"], "tenant_id": tenant_id(request), "reason": body.reason})
+        updated = db.one("SELECT * FROM compliance WHERE tenant_id = ?", (tenant_id(request),))
+        allowed = bool(updated and updated["signage_confirmed"] and updated["mandate_confirmed"] and not updated["kill_switch"])
+        return {**row_dict(updated), "recording_allowed": allowed}
 
     @app.post("/api/compliance/revoke", response_model=ComplianceView)
     def revoke_compliance(body: ComplianceReason, request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
         db: Database = request.app.state.db
         db.execute(
-            "UPDATE compliance SET signage_confirmed = 0, mandate_confirmed = 0, kill_switch = 1, updated_at = ? WHERE id = 1",
-            (utc_now(),),
+            "UPDATE compliance SET signage_confirmed = 0, mandate_confirmed = 0, kill_switch = 1, updated_at = ? WHERE tenant_id = ?",
+            (utc_now(), tenant_id(request)),
         )
-        db.audit("revoke", "compliance", "1", {"user_id": user["id"], "reason": body.reason})
-        updated = db.one("SELECT * FROM compliance WHERE id = 1")
+        db.audit("revoke", "compliance", "1", {"user_id": user["id"], "tenant_id": tenant_id(request), "reason": body.reason})
+        updated = db.one("SELECT * FROM compliance WHERE tenant_id = ?", (tenant_id(request),))
         return {**row_dict(updated), "recording_allowed": False}
 
     @app.post("/api/compliance/clear-kill-switch", response_model=ComplianceView)
     def clear_kill_switch(body: ComplianceReason, request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
         db: Database = request.app.state.db
-        row = db.one("SELECT * FROM compliance WHERE id = 1")
+        row = db.one("SELECT * FROM compliance WHERE tenant_id = ?", (tenant_id(request),))
         if not (row["signage_confirmed"] and row["mandate_confirmed"]):
             raise HTTPException(status_code=423, detail="No se puede liberar el kill-switch sin ambas confirmaciones")
-        db.execute("UPDATE compliance SET kill_switch = 0, updated_at = ? WHERE id = 1", (utc_now(),))
-        db.audit("clear_kill_switch", "compliance", "1", {"user_id": user["id"], "reason": body.reason})
-        updated = db.one("SELECT * FROM compliance WHERE id = 1")
+        db.execute("UPDATE compliance SET kill_switch = 0, updated_at = ? WHERE tenant_id = ?", (utc_now(), tenant_id(request)))
+        db.audit("clear_kill_switch", "compliance", "1", {"user_id": user["id"], "tenant_id": tenant_id(request), "reason": body.reason})
+        updated = db.one("SELECT * FROM compliance WHERE tenant_id = ?", (tenant_id(request),))
         return {**row_dict(updated), "recording_allowed": True}
 
     @app.get("/api/cameras")
     def list_cameras(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
-        rows = request.app.state.db.many("SELECT id, name, host, port, path, username, transport, enabled, created_at, updated_at FROM cameras ORDER BY name")
+        rows = request.app.state.db.many("SELECT id, name, host, port, path, username, transport, enabled, created_at, updated_at FROM cameras WHERE tenant_id = ? ORDER BY name", (tenant_id(request),))
         return {"items": [row_dict(row) for row in rows]}
 
     @app.post("/api/cameras", status_code=201)
@@ -518,16 +527,16 @@ def create_app(
         camera_id = str(uuid4())
         now = utc_now()
         db.execute(
-            "INSERT INTO cameras(id, name, host, port, path, username, transport, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (camera_id, body.name.strip(), body.host.strip(), body.port, body.path, body.username, body.transport, int(body.enabled), now, now),
+            "INSERT INTO cameras(id, tenant_id, name, host, port, path, username, transport, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (camera_id, tenant_id(request), body.name.strip(), body.host.strip(), body.port, body.path, body.username, body.transport, int(body.enabled), now, now),
         )
         store_secret(db, request, f"camera:{camera_id}:password", body.password, user["id"])
-        db.audit("create", "camera", camera_id, {"user_id": user["id"], "name": body.name.strip()})
-        return camera_public(db.one("SELECT * FROM cameras WHERE id = ?", (camera_id,)))
+        db.audit("create", "camera", camera_id, {"user_id": user["id"], "tenant_id": tenant_id(request), "name": body.name.strip()})
+        return camera_public(db.one("SELECT * FROM cameras WHERE id = ? AND tenant_id = ?", (camera_id, tenant_id(request))))
 
     @app.get("/api/cameras/{camera_id}")
     def get_camera(camera_id: str, request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
-        row = request.app.state.db.one("SELECT * FROM cameras WHERE id = ?", (camera_id,))
+        row = request.app.state.db.one("SELECT * FROM cameras WHERE id = ? AND tenant_id = ?", (camera_id, tenant_id(request)))
         if row is None:
             raise HTTPException(status_code=404, detail="Cámara no encontrada")
         return camera_public(row)
@@ -535,68 +544,70 @@ def create_app(
     @app.put("/api/cameras/{camera_id}")
     def update_camera(camera_id: str, body: CameraUpdate, request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
         db: Database = request.app.state.db
-        if db.one("SELECT id FROM cameras WHERE id = ?", (camera_id,)) is None:
+        if db.one("SELECT id FROM cameras WHERE id = ? AND tenant_id = ?", (camera_id, tenant_id(request))) is None:
             raise HTTPException(status_code=404, detail="Cámara no encontrada")
         db.execute(
-            "UPDATE cameras SET name=?, host=?, port=?, path=?, username=?, transport=?, enabled=?, updated_at=? WHERE id=?",
-            (body.name.strip(), body.host.strip(), body.port, body.path, body.username, body.transport, int(body.enabled), utc_now(), camera_id),
+            "UPDATE cameras SET name=?, host=?, port=?, path=?, username=?, transport=?, enabled=?, updated_at=? WHERE id=? AND tenant_id=?",
+            (body.name.strip(), body.host.strip(), body.port, body.path, body.username, body.transport, int(body.enabled), utc_now(), camera_id, tenant_id(request)),
         )
         if body.password is not None:
             store_secret(db, request, f"camera:{camera_id}:password", body.password, user["id"])
-        db.audit("update", "camera", camera_id, {"user_id": user["id"]})
-        return camera_public(db.one("SELECT * FROM cameras WHERE id = ?", (camera_id,)))
+        db.audit("update", "camera", camera_id, {"user_id": user["id"], "tenant_id": tenant_id(request)})
+        return camera_public(db.one("SELECT * FROM cameras WHERE id = ? AND tenant_id = ?", (camera_id, tenant_id(request))))
 
     @app.delete("/api/cameras/{camera_id}")
     def delete_camera(camera_id: str, request: Request, user: Any = Depends(current_user)) -> dict[str, str]:
         db: Database = request.app.state.db
-        if db.one("SELECT id FROM cameras WHERE id = ?", (camera_id,)) is None:
+        if db.one("SELECT id FROM cameras WHERE id = ? AND tenant_id = ?", (camera_id, tenant_id(request))) is None:
             raise HTTPException(status_code=404, detail="Cámara no encontrada")
-        db.execute("DELETE FROM cameras WHERE id = ?", (camera_id,))
-        db.audit("delete", "camera", camera_id, {"user_id": user["id"]})
+        db.execute("DELETE FROM cameras WHERE id = ? AND tenant_id = ?", (camera_id, tenant_id(request)))
+        db.audit("delete", "camera", camera_id, {"user_id": user["id"], "tenant_id": tenant_id(request)})
         return {"status": "deleted"}
 
     @app.post("/api/cameras/{camera_id}/zones", status_code=201)
     def create_zone(camera_id: str, body: ZoneInput, request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
         db: Database = request.app.state.db
-        if db.one("SELECT id FROM cameras WHERE id = ?", (camera_id,)) is None:
+        if db.one("SELECT id FROM cameras WHERE id = ? AND tenant_id = ?", (camera_id, tenant_id(request))) is None:
             raise HTTPException(status_code=404, detail="Cámara no encontrada")
         zone_id = str(uuid4())
         db.execute(
-            "INSERT INTO zones(id, camera_id, name, coordinates, created_at) VALUES (?, ?, ?, ?, ?)",
-            (zone_id, camera_id, body.name.strip(), json.dumps(body.coordinates), utc_now()),
+            "INSERT INTO zones(id, tenant_id, camera_id, name, coordinates, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (zone_id, tenant_id(request), camera_id, body.name.strip(), json.dumps(body.coordinates), utc_now()),
         )
-        db.audit("create", "zone", zone_id, {"user_id": user["id"], "camera_id": camera_id})
-        return zone_public(db.one("SELECT * FROM zones WHERE id = ?", (zone_id,)))
+        db.audit("create", "zone", zone_id, {"user_id": user["id"], "tenant_id": tenant_id(request), "camera_id": camera_id})
+        return zone_public(db.one("SELECT * FROM zones WHERE id = ? AND tenant_id = ?", (zone_id, tenant_id(request))))
 
     @app.get("/api/cameras/{camera_id}/zones")
     def list_zones(camera_id: str, request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
-        rows = request.app.state.db.many("SELECT * FROM zones WHERE camera_id = ? ORDER BY name", (camera_id,))
+        rows = request.app.state.db.many("SELECT * FROM zones WHERE tenant_id = ? AND camera_id = ? ORDER BY name", (tenant_id(request), camera_id))
         return {"items": [zone_public(row) for row in rows]}
 
     @app.delete("/api/cameras/{camera_id}/zones/{zone_id}")
     def delete_zone(camera_id: str, zone_id: str, request: Request, user: Any = Depends(current_user)) -> dict[str, str]:
         db: Database = request.app.state.db
-        if db.one("SELECT id FROM zones WHERE id = ? AND camera_id = ?", (zone_id, camera_id)) is None:
+        if db.one("SELECT id FROM zones WHERE id = ? AND tenant_id = ? AND camera_id = ?", (zone_id, tenant_id(request), camera_id)) is None:
             raise HTTPException(status_code=404, detail="Zona no encontrada")
-        db.execute("DELETE FROM zones WHERE id = ?", (zone_id,))
-        db.audit("delete", "zone", zone_id, {"user_id": user["id"], "camera_id": camera_id})
+        db.execute("DELETE FROM zones WHERE id = ? AND tenant_id = ?", (zone_id, tenant_id(request)))
+        db.audit("delete", "zone", zone_id, {"user_id": user["id"], "tenant_id": tenant_id(request), "camera_id": camera_id})
         return {"status": "deleted"}
 
     @app.get("/api/notification-rules")
     def list_rules(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
-        rows = request.app.state.db.many("SELECT * FROM notification_rules ORDER BY id")
+        rows = request.app.state.db.many("SELECT * FROM notification_rules WHERE tenant_id = ? ORDER BY id", (tenant_id(request),))
         return {"items": [row_dict(row) for row in rows]}
 
     @app.post("/api/notification-rules", status_code=201)
     def create_rule(body: RuleInput, request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
         db: Database = request.app.state.db
         rule_id = str(uuid4())
+        if body.zone_id is not None and db.one("SELECT id FROM zones WHERE id = ? AND tenant_id = ?", (body.zone_id, tenant_id(request))) is None:
+            raise HTTPException(status_code=404, detail="Zona no encontrada")
         db.execute(
-            "INSERT INTO notification_rules(id, class_name, zone_id, cooldown_seconds, silence_start, silence_end, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (rule_id, body.class_name, body.zone_id, body.cooldown_seconds, body.silence_start, body.silence_end, int(body.enabled)),
+            "INSERT INTO notification_rules(id, tenant_id, class_name, zone_id, cooldown_seconds, silence_start, silence_end, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (rule_id, tenant_id(request), body.class_name, body.zone_id, body.cooldown_seconds, body.silence_start, body.silence_end, int(body.enabled)),
         )
-        db.audit("create", "notification_rule", rule_id, {"user_id": user["id"]})
-        return row_dict(db.one("SELECT * FROM notification_rules WHERE id = ?", (rule_id,)))
+        db.audit("create", "notification_rule", rule_id, {"user_id": user["id"], "tenant_id": tenant_id(request)})
+        return row_dict(db.one("SELECT * FROM notification_rules WHERE id = ? AND tenant_id = ?", (rule_id, tenant_id(request))))
 
     @app.post("/api/secrets/{name}", status_code=201)
     def set_secret(name: str, value: SettingUpdate, request: Request, user: Any = Depends(current_user)) -> dict[str, str]:
@@ -605,20 +616,20 @@ def create_app(
 
     @app.get("/api/secrets")
     def list_secrets(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
-        rows = request.app.state.db.many("SELECT name, created_at, updated_at FROM secrets ORDER BY name")
+        rows = request.app.state.db.many("SELECT name, created_at, updated_at FROM secrets WHERE tenant_id = ? ORDER BY name", (tenant_id(request),))
         return {"items": [row_dict(row) for row in rows]}
 
     @app.get("/api/audit")
     def audit_log(request: Request, _user: Any = Depends(current_user)) -> dict[str, Any]:
-        rows = request.app.state.db.many("SELECT id, action, entity, entity_id, details, created_at FROM audit_log ORDER BY id")
+        rows = request.app.state.db.many("SELECT id, tenant_id, action, entity, entity_id, details, created_at FROM audit_log WHERE tenant_id = ? ORDER BY id", (tenant_id(request),))
         return {"items": [row_dict(row) for row in rows]}
 
     @app.post("/api/frigate/render")
     def render_frigate(request: Request, user: Any = Depends(current_user)) -> dict[str, Any]:
         db: Database = request.app.state.db
-        compliance = db.one("SELECT * FROM compliance WHERE id = 1")
+        compliance = db.one("SELECT * FROM compliance WHERE tenant_id = ?", (tenant_id(request),))
         allowed = bool(compliance["signage_confirmed"] and compliance["mandate_confirmed"] and not compliance["kill_switch"])
-        cameras = db.many("SELECT * FROM cameras WHERE enabled = 1 ORDER BY id")
+        cameras = db.many("SELECT * FROM cameras WHERE tenant_id = ? AND enabled = 1 ORDER BY id", (tenant_id(request),))
         config: dict[str, Any] = {
             "version": "0.16-0",
             "mqtt": {"host": "mosquitto", "port": 1883},
@@ -628,7 +639,7 @@ def create_app(
             "cameras": {},
         }
         for camera in cameras:
-            zones = db.many("SELECT * FROM zones WHERE camera_id = ? ORDER BY name", (camera["id"],))
+            zones = db.many("SELECT * FROM zones WHERE tenant_id = ? AND camera_id = ? ORDER BY name", (tenant_id(request), camera["id"]))
             config["cameras"][camera["name"]] = {
                 "ffmpeg": {"inputs": [{"path": f"{camera['transport']}://{camera['host']}:{camera['port']}/{camera['path'].lstrip('/')}", "roles": ["detect"]}]},
                 "zones": {zone["name"]: {"coordinates": ",".join(map(str, json.loads(zone["coordinates"]))), "objects": ["person", "car", "motorcycle", "bicycle"]} for zone in zones},
@@ -653,7 +664,7 @@ def create_app(
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail="La configuración se guardó, pero Frigate no confirmó el reinicio") from exc
 
-        db.audit("apply", "frigate_config", str(config_path), {"user_id": user["id"], "recording_enabled": allowed})
+        db.audit("apply", "frigate_config", str(config_path), {"user_id": user["id"], "tenant_id": tenant_id(request), "recording_enabled": allowed})
         return {"yaml": rendered_yaml, "recording_enabled": str(allowed).lower(), "applied": True}
 
     return app
@@ -663,11 +674,11 @@ def store_secret(db: Database, request: Request, name: str, value: str, user_id:
     cipher = make_fernet(request.app.state.encryption_key).encrypt(value.encode("utf-8"))
     now = utc_now()
     db.execute(
-        "INSERT INTO secrets(name, ciphertext, created_at, updated_at) VALUES (?, ?, ?, ?) "
-        "ON CONFLICT(name) DO UPDATE SET ciphertext=excluded.ciphertext, updated_at=excluded.updated_at",
-        (name, cipher, now, now),
+        "INSERT INTO secrets(tenant_id, name, ciphertext, created_at, updated_at) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(tenant_id, name) DO UPDATE SET ciphertext=excluded.ciphertext, updated_at=excluded.updated_at",
+        (int(request.state.tenant_id), name, cipher, now, now),
     )
-    db.audit("upsert", "secret", name, {"user_id": user_id})
+    db.audit("upsert", "secret", name, {"user_id": user_id, "tenant_id": int(request.state.tenant_id)})
 
 
 def camera_public(row: Any) -> dict[str, Any]:

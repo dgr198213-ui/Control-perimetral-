@@ -12,7 +12,7 @@ for evidence in carteleria-verificada encargo-tratamiento-firmado; do
   fi
 done
 
-if grep -Eq '^  enabled: true' "$CONFIG"; then
+if grep -A1 -Eq '^record:$' "$CONFIG" | grep -Eq '^  enabled: true$'; then
   echo "La grabación ya está habilitada; no se realizan cambios."
   exit 0
 fi
@@ -23,10 +23,13 @@ from pathlib import Path
 import sys
 path = Path(sys.argv[1])
 text = path.read_text()
-needle = "record:\n  enabled: false"
-if needle not in text:
+record_needle = "record:\n  enabled: false"
+snapshot_needle = "snapshots:\n  enabled: false"
+if record_needle not in text or snapshot_needle not in text:
     raise SystemExit("No se encontró el bloqueo esperado; revisión manual necesaria")
-path.write_text(text.replace(needle, "record:\n  enabled: true", 1))
+text = text.replace(record_needle, "record:\n  enabled: true", 1)
+text = text.replace(snapshot_needle, "snapshots:\n  enabled: true", 1)
+path.write_text(text)
 PY
 
 echo "Grabación habilitada tras verificar las dos evidencias. Reinicia con: docker compose up -d --force-recreate frigate notifier"

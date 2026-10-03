@@ -450,8 +450,45 @@ def test_public_sources_catalog_is_authenticated_and_privacy_scoped(tmp_path: Pa
     response = authenticated.get("/api/public-sources")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["count"] >= 3
-    assert any(item["id"] == "dgt-traffic-cameras" and item["status"] == "integrated" for item in payload["items"])
+    assert payload["count"] == 2
+    assert {item["id"] for item in payload["items"]} == {"ign-pnoa-orthophotos", "openstreetmap-basemap"}
     assert all(item["personal_tracking"] is False for item in payload["items"])
     assert "TELEGRAM_BOT_TOKEN" not in response.text
     assert "bssid" not in response.text.lower()
+
+
+def test_resources_are_isolated_by_tenant(tmp_path: Path) -> None:
+    db_path = tmp_path / "control.sqlite3"
+    first = make_client(tmp_path)
+    assert first.post("/api/auth/setup", json={"username": "tenant-one", "password": "una-password-larga"}).status_code == 201
+    assert first.post("/api/auth/login", json={"username": "tenant-one", "password": "una-password-larga"}).status_code == 200
+    created = first.post(
+        "/api/cameras",
+        json={"name": "camara-uno", "host": "192.0.2.1", "path": "stream", "username": "u", "password": "secret"},
+    )
+    assert created.status_code == 201
+    connection = sqlite3.connect(db_path)
+    connection.execute("INSERT INTO tenants(slug, name, created_at) VALUES ('tenant-two', 'Tenant 2', datetime('now'))")
+    tenant_two = connection.execute("SELECT id FROM tenants WHERE slug = 'tenant-two'").fetchone()[0]
+    password_hash = control_api_app.PASSWORDS.hash("otra-password-larga")
+    connection.execute(
+        "INSERT INTO users(tenant_id, username, password_hash, created_at) VALUES (?, ?, ?, datetime('now'))",
+        (tenant_two, "tenant-two", password_hash),
+    )
+    connection.execute(
+        "INSERT INTO compliance(id, tenant_id, updated_at) VALUES (?, ?, datetime('now'))",
+        (tenant_two, tenant_two),
+    )
+    connection.execute(
+        "INSERT INTO protection_profile(tenant_id, created_at, updated_at) VALUES (?, datetime('now'), datetime('now'))",
+        (tenant_two,),
+    )
+    connection.commit()
+    connection.close()
+
+    second = make_client(tmp_path)
+    assert second.post("/api/auth/login", json={"username": "tenant-two", "password": "otra-password-larga"}).status_code == 200
+    assert second.get("/api/cameras").json()["items"] == []
+    assert second.get("/api/audit").json()["items"] == []
+    assert second.get("/api/compliance").json()["recording_allowed"] is False
+    assert first.get("/api/cameras").json()["items"][0]["name"] == "camara-uno"

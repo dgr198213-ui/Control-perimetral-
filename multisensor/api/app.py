@@ -2,14 +2,12 @@
 from __future__ import annotations
 
 import logging
-import json
 import os
 from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, request
 
-from multisensor.adapters import WifiCsiAdapterError, wifi_csi_message_to_observation
 from multisensor.health import SensorHealthService
 from multisensor.persistence import (
     EventRepository,
@@ -46,7 +44,6 @@ def create_app(
     incident_repository = incidents or InMemoryIncidentRepository()
     evidence_dir = Path(compliance_dir or os.getenv("COMPLIANCE_DIR", "/compliance"))
     app = Flask(__name__)
-    configured_anchors = json.loads(os.getenv("WIFI_CSI_ANCHORS", "[]"))
 
     def compliance_ready() -> bool:
         return all((evidence_dir / name).is_file() for name in REQUIRED_EVIDENCE)
@@ -84,19 +81,6 @@ def create_app(
             return jsonify(payload), 404
         return jsonify(resource.to_dict())
 
-    @app.post("/api/multisensor/wifi-csi")
-    def ingest_wifi_csi():
-        message = request.get_json(silent=True)
-        if isinstance(message, dict) and "measurements" in message and "anchors" not in message:
-            message = {**message, "anchors": configured_anchors}
-        try:
-            observation = wifi_csi_message_to_observation(message)
-            observation_repository.save(observation)
-        except (WifiCsiAdapterError, ValueError) as exc:
-            payload, _ = _error_payload("invalid_wifi_csi", str(exc))
-            return jsonify(payload), 400
-        return jsonify(observation.to_dict()), 201
-
     @app.get("/api/multisensor/observations")
     def list_observations():
         payload, status = collection(observation_repository.all())
@@ -123,12 +107,6 @@ def create_app(
     @app.get("/api/multisensor/incidents/<path:incident_id>")
     def get_incident(incident_id: str):
         return resource_or_404(incident_repository.get(incident_id), "incidente")
-
-    @app.get("/api/multisensor/wifi-csi/health")
-    def wifi_csi_health():
-        wifi_items = [item for item in observation_repository.all() if item.sensor_type == "wifi_csi"]
-        latest = max((item.timestamp for item in wifi_items), default=None)
-        return jsonify({"status": "ok" if latest is not None else "waiting", "observation_count": len(wifi_items), "last_observation": latest.isoformat().replace("+00:00", "Z") if latest else None}), 200
 
     @app.get("/api/multisensor/health")
     def sensor_health():

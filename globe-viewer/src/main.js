@@ -5,7 +5,6 @@ import { startFrigateBridge } from "./frigateBridge.js";
 import { startMultisensorBridge } from "./multisensorBridge.js";
 import { createMultisensorLayers } from "./multisensorLayers.js";
 import { CAMERAS as EXAMPLE_CAMERAS } from "./cameras.config.example.js";
-import { startTrafficCameraLayer } from "./trafficCameras.js";
 
 // Configuración real opcional, ignorada por Git. En Vercel o una instalación
 // limpia no existe y se conserva el fallback ficticio para que la build funcione.
@@ -75,18 +74,6 @@ if (CAMERAS.some((c) => c.lat !== 0 || c.lon !== 0)) {
 }
 
 const satelliteStatusEl = document.getElementById("satelliteStatus");
-const trafficStatusEl = document.getElementById("trafficStatus");
-const trafficLayer = startTrafficCameraLayer(viewer, {
-  onStatus: (message) => { if (trafficStatusEl) trafficStatusEl.textContent = message; },
-});
-
-document.getElementById("toggleTraffic")?.addEventListener("click", (event) => {
-  const visible = event.currentTarget.dataset.visible !== "true";
-  trafficLayer.setVisible(visible);
-  event.currentTarget.dataset.visible = String(visible);
-  event.currentTarget.textContent = visible ? "Ocultar cámaras DGT" : "Mostrar cámaras DGT";
-});
-document.getElementById("refreshTraffic")?.addEventListener("click", () => trafficLayer.refresh());
 if (satelliteStatusEl) satelliteStatusEl.textContent = "Base satelital Esri activa · no es vídeo en directo";
 
 // ── Eventos de detección en tiempo real (Frigate) ─────────────────────────

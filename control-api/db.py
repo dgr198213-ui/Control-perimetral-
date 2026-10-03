@@ -115,6 +115,90 @@ MIGRATIONS = (
         VALUES (1, datetime('now'), datetime('now'));
         """,
     ),
+    (
+        3,
+        "multi-tenant-isolation",
+        """
+        CREATE TABLE tenants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO tenants(id, slug, name, created_at)
+        VALUES (1, 'default', 'Organización principal', datetime('now'));
+
+        ALTER TABLE users ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE cameras ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE zones ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE notification_rules ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE audit_log ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
+
+        CREATE TABLE settings_v3 (
+            tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (tenant_id, key)
+        );
+        INSERT INTO settings_v3(tenant_id, key, value, updated_at)
+        SELECT 1, key, value, updated_at FROM settings;
+        DROP TABLE settings;
+        ALTER TABLE settings_v3 RENAME TO settings;
+
+        CREATE TABLE secrets_v3 (
+            tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            ciphertext BLOB NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (tenant_id, name)
+        );
+        INSERT INTO secrets_v3(tenant_id, name, ciphertext, created_at, updated_at)
+        SELECT 1, name, ciphertext, created_at, updated_at FROM secrets;
+        DROP TABLE secrets;
+        ALTER TABLE secrets_v3 RENAME TO secrets;
+
+        CREATE TABLE compliance_v3 (
+            id INTEGER NOT NULL UNIQUE,
+            tenant_id INTEGER PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+            signage_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (signage_confirmed IN (0, 1)),
+            mandate_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (mandate_confirmed IN (0, 1)),
+            kill_switch INTEGER NOT NULL DEFAULT 0 CHECK (kill_switch IN (0, 1)),
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO compliance_v3(id, tenant_id, signage_confirmed, mandate_confirmed, kill_switch, updated_at)
+        SELECT 1, 1, signage_confirmed, mandate_confirmed, kill_switch, updated_at FROM compliance;
+        DROP TABLE compliance;
+        ALTER TABLE compliance_v3 RENAME TO compliance;
+
+        CREATE TABLE protection_profile_v3 (
+            tenant_id INTEGER PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+            site_type TEXT NOT NULL DEFAULT 'property'
+                CHECK (site_type IN ('property', 'farm', 'land', 'warehouse', 'business')),
+            protection_mode TEXT NOT NULL DEFAULT 'balanced'
+                CHECK (protection_mode IN ('quiet', 'balanced', 'strict')),
+            detect_people INTEGER NOT NULL DEFAULT 1 CHECK (detect_people IN (0, 1)),
+            detect_vehicles INTEGER NOT NULL DEFAULT 1 CHECK (detect_vehicles IN (0, 1)),
+            detect_animals INTEGER NOT NULL DEFAULT 0 CHECK (detect_animals IN (0, 1)),
+            night_protection INTEGER NOT NULL DEFAULT 1 CHECK (night_protection IN (0, 1)),
+            notify_on_suspicious INTEGER NOT NULL DEFAULT 1 CHECK (notify_on_suspicious IN (0, 1)),
+            notify_on_incident INTEGER NOT NULL DEFAULT 1 CHECK (notify_on_incident IN (0, 1)),
+            quiet_hours_start TEXT,
+            quiet_hours_end TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO protection_profile_v3(tenant_id, site_type, protection_mode, detect_people, detect_vehicles,
+            detect_animals, night_protection, notify_on_suspicious, notify_on_incident,
+            quiet_hours_start, quiet_hours_end, created_at, updated_at)
+        SELECT 1, site_type, protection_mode, detect_people, detect_vehicles, detect_animals,
+            night_protection, notify_on_suspicious, notify_on_incident,
+            quiet_hours_start, quiet_hours_end, created_at, updated_at FROM protection_profile;
+        DROP TABLE protection_profile;
+        ALTER TABLE protection_profile_v3 RENAME TO protection_profile;
+        """,
+    ),
 )
 
 
@@ -159,7 +243,8 @@ class Database:
         return list(self.connection.execute(sql, params).fetchall())
 
     def audit(self, action: str, entity: str, entity_id: str | None, details: dict[str, Any]) -> None:
+        tenant_id = int(details.get("tenant_id", 1))
         self.execute(
-            "INSERT INTO audit_log(action, entity, entity_id, details, created_at) VALUES (?, ?, ?, ?, ?)",
-            (action, entity, entity_id, json.dumps(details, sort_keys=True), utc_now()),
+            "INSERT INTO audit_log(tenant_id, action, entity, entity_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (tenant_id, action, entity, entity_id, json.dumps(details, sort_keys=True), utc_now()),
         )
